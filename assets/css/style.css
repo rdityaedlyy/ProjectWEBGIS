@@ -639,7 +639,7 @@ input[type="range"]:disabled {
   top: 10px;
   right: 10px;
   z-index: 800;
-  width: 224px;
+  width: 242px;
   background: rgba(9, 14, 25, 0.88);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-strong);
@@ -698,7 +698,7 @@ input[type="range"]:disabled {
 
 .bm-btn {
   padding: 5px 4px;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   font-family: inherit;
   background: rgba(15, 23, 42, 0.75);
@@ -707,6 +707,7 @@ input[type="range"]:disabled {
   border-radius: var(--radius);
   cursor: pointer;
   text-align: center;
+  white-space: nowrap;
   transition: all 0.15s ease;
 }
 .bm-btn:hover {

@@ -190,22 +190,38 @@
   const map = L.map('map', {
     center: [state.projectCfg.centerLat || -6.5458, state.projectCfg.centerLng || 107.7232],
     zoom: 14,
+    maxZoom: 21,
     zoomControl: true,
     preferCanvas: false
   });
 
   const basemaps = {
-    dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      maxZoom: 20
+    google_satellite: L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      subdomains: ['0', '1', '2', '3'],
+      attribution: '&copy; Google Satellite',
+      maxZoom: 21
     }),
-    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
-      maxZoom: 19
+    google_hybrid: L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+      subdomains: ['0', '1', '2', '3'],
+      attribution: '&copy; Google Hybrid',
+      maxZoom: 21
+    }),
+    google_street: L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      subdomains: ['0', '1', '2', '3'],
+      attribution: '&copy; Google Street',
+      maxZoom: 21
     }),
     osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 19
+    }),
+    dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      maxZoom: 20
+    }),
+    light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      maxZoom: 20
     })
   };
 
