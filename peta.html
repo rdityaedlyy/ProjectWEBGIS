@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LANDACQ // WebGIS Pembebasan Lahan Koridor Proyek</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/shpjs@6.2.0/dist/shp.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+
+  <!-- Application Styles -->
+  <link rel="icon" type="image/svg+xml" href="assets/img/logo-landacq.svg" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+  <!-- TOP HEADER -->
+  <header class="app-header">
+    <div class="header-left">
+      <button id="btnToggleLeft" class="btn btn-icon mobile-only-btn" title="Dashboard & Filter">
+        <i data-lucide="layout-dashboard" width="16" height="16"></i>
+      </button>
+      <div class="brand-mark">
+        <i data-lucide="map-pinned" width="17" height="17"></i>
+      </div>
+      <div class="brand-text">
+        <div class="brand-title">
+          <span>LANDACQ // WEBGIS</span>
+          <span class="brand-tag">PROTOTYPE v1.0</span>
+        </div>
+        <div id="projectSubtitle" class="brand-sub">Sistem Informasi Geografis Pembebasan Lahan</div>
+      </div>
+      <nav class="header-nav" aria-label="Navigasi Halaman">
+        <a href="peta.html" class="nav-tab active">
+          <i data-lucide="map" width="13" height="13"></i>
+          <span class="nav-txt">Peta WebGIS</span>
+        </a>
+        <a id="navAdminTab" href="admin.html" class="nav-tab">
+          <i data-lucide="settings-2" width="13" height="13"></i>
+          <span class="nav-txt">Kelola / Admin</span>
+        </a>
+      </nav>
+    </div>
+
+    <div class="header-right">
+      <div class="user-chip" title="Pengguna Aktif">
+        <i data-lucide="user-check" width="13" height="13" style="color: var(--accent-cyan); flex-shrink: 0;"></i>
+        <span id="headerUserName">Admin</span>
+      </div>
+
+      <div class="role-control" title="Simulasi Hak Akses (RBAC)">
+        <span class="role-label">
+          <span id="roleDot" class="role-dot" style="background: #10b981;"></span>
+          <span class="lbl-txt">Role:</span>
+        </span>
+        <select id="roleSelect" class="role-select" aria-label="Pilih Hak Akses">
+          <option value="admin">Admin / Koordinator</option>
+          <option value="surveyor">Surveyor / Lapangan</option>
+          <option value="viewer">Viewer / Eksekutif</option>
+        </select>
+      </div>
+
+      <button id="btnOpenImport" class="btn btn-primary" title="Import GeoJSON, Shapefile (.zip), atau Excel (.xlsx)">
+        <i data-lucide="upload" width="14" height="14"></i>
+        <span class="btn-label-hide">Import</span>
+      </button>
+
+      <button id="btnOpenExport" class="btn" title="Export GeoJSON atau Laporan Excel (.xlsx)">
+        <i data-lucide="download" width="14" height="14"></i>
+        <span class="btn-label-hide">Export</span>
+      </button>
+
+      <button id="btnRefreshDb" class="btn btn-icon" title="Muat Ulang Data dari Database">
+        <i data-lucide="refresh-cw" width="14" height="14"></i>
+      </button>
+
+      <button id="btnLogout" class="btn btn-danger btn-icon" title="Keluar ke Halaman Login">
+        <i data-lucide="log-out" width="14" height="14"></i>
+      </button>
+
+      <button id="btnToggleRight" class="btn btn-icon mobile-only-btn" title="Panel Inspeksi Persil">
+        <i data-lucide="sliders-horizontal" width="16" height="16"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE -->
+  <div class="workspace">
+
+    <!-- LEFT SIDEBAR: KPI, CHART & FILTERS -->
+    <aside id="sidebarLeft" class="sidebar sidebar-left">
+      <div class="sidebar-scroll">
+
+        <!-- Dashboard Ringkasan Capaian -->
+        <section class="panel-section">
+          <div class="section-head">
+            <span class="section-title">
+              <i data-lucide="activity" width="13" height="13" style="color: var(--accent-cyan);"></i>
+              Dashboard Capaian
+            </span>
+            <span id="kpiScopeBadge" class="mono" style="font-size: 10px; color: var(--accent-cyan);">0 / 0 PERSIL</span>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">
+                <span>Total Persil</span>
+                <i data-lucide="layers" width="11" height="11"></i>
+              </div>
+              <div id="kpiTotalPersil" class="kpi-val mono">0</div>
+              <div id="kpiTotalPersilSub" class="kpi-sub">dari 0 bidang koridor</div>
+            </div>
+
+            <div class="kpi-card kpi-blue">
+              <div class="kpi-label">
+                <span>Total Luas</span>
+                <i data-lucide="maximize-2" width="11" height="11"></i>
+              </div>
+              <div id="kpiTotalLuas" class="kpi-val mono">0 m²</div>
+              <div id="kpiTotalHa" class="kpi-sub mono">0,00 Ha</div>
+            </div>
+
+            <div class="kpi-card kpi-green">
+              <div class="kpi-label">
+                <span>Terbebaskan</span>
+                <i data-lucide="check-square" width="11" height="11"></i>
+              </div>
+              <div id="kpiBebasPct" class="kpi-val mono">0%</div>
+              <div id="kpiBebasLuas" class="kpi-sub mono">0 m² (0,00 Ha)</div>
+              <div class="kpi-progress-track">
+                <div id="kpiBebasBar" class="kpi-progress-fill" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <div class="kpi-card kpi-amber">
+              <div class="kpi-label">
+                <span>Anggaran UGR</span>
+                <i data-lucide="banknote" width="11" height="11"></i>
+              </div>
+              <div id="kpiTotalUgr" class="kpi-val mono">Rp 0</div>
+              <div id="kpiTotalUgrExact" class="kpi-sub mono" title="">Rp 0</div>
+            </div>
+          </div>
+
+          <div class="chart-wrap">
+            <div class="chart-canvas-box">
+              <canvas id="statusChart"></canvas>
+              <div class="chart-center-stat">
+                <span id="chartCenterPct" class="chart-center-num mono">0%</span>
+                <span class="chart-center-lbl">Bebas</span>
+              </div>
+            </div>
+            <div id="chartLegendList" class="chart-legend-list"></div>
+          </div>
+        </section>
+
+        <!-- Pencarian & Filter -->
+        <section class="panel-section">
+          <div class="section-head">
+            <span class="section-title">
+              <i data-lucide="filter" width="13" height="13" style="color: var(--accent-cyan);"></i>
+              Pencarian & Filter
+            </span>
+            <button id="btnResetFilters" class="btn btn-sm" style="height: 22px; font-size: 10px;">
+              Reset
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label class="field-label" for="searchInput">Cari Cepat</label>
+            <div class="input-wrap">
+              <span class="input-icon"><i data-lucide="search" width="13" height="13"></i></span>
+              <input id="searchInput" class="input with-icon" type="text" placeholder="ID Persil, Pemilik, atau Desa..." autocomplete="off" />
+              <button id="btnClearSearch" class="clear-search-btn" title="Hapus pencarian">
+                <i data-lucide="x" width="13" height="13"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="filterStatus">Status</label>
+              <select id="filterStatus" class="select">
+                <option value="ALL">Semua Status</option>
+                <option value="Bebas/Lunas">Bebas/Lunas</option>
+                <option value="Proses Pembayaran UGR">Proses Pembayaran UGR</option>
+                <option value="Negosiasi">Negosiasi</option>
+                <option value="Sengketa/Kendala">Sengketa/Kendala</option>
+                <option value="Belum Diproses">Belum Diproses</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="filterDesa">Desa / Kel.</label>
+              <select id="filterDesa" class="select">
+                <option value="ALL">Semua Wilayah</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 8px;">
+            <label class="field-label" for="filterMinArea">
+              <span>Luas Minimum</span>
+              <span id="filterMinAreaVal" class="mono" style="color: #67e8f9;">0 m²</span>
+            </label>
+            <input id="filterMinArea" type="range" min="0" max="10000" step="100" value="0" />
+          </div>
+
+          <div class="filter-footer">
+            <span>Tampil: <strong id="filterCountText" class="mono">0 / 0</strong> persil</span>
+            <span id="activeFilterNote" style="color: var(--accent-cyan);">Semua data aktif</span>
+          </div>
+        </section>
+
+      </div>
+    </aside>
+
+    <!-- CENTER STAGE: MAP + COLLAPSIBLE ATTRIBUTE TABLE -->
+    <main class="center-stage">
+      <div class="map-container-wrap">
+        <div id="map"></div>
+
+        <!-- Basemap & Layer Floating Control -->
+        <div id="mapCtrlPanel" class="map-ctrl-panel">
+          <div id="mapCtrlToggle" class="map-ctrl-head">
+            <span class="map-ctrl-title">
+              <i data-lucide="layers" width="12" height="12" style="color: var(--accent-cyan);"></i>
+              Basemap & Layer
+            </span>
+            <i id="mapCtrlChevron" data-lucide="chevron-up" width="13" height="13" style="color: var(--text-secondary);"></i>
+          </div>
+          <div class="map-ctrl-body">
+            <div>
+              <div class="field-label" style="margin-bottom: 4px;">Basemap</div>
+              <div class="basemap-grid">
+                <button class="bm-btn active" data-basemap="dark">Dark</button>
+                <button class="bm-btn" data-basemap="satellite">Satelit</button>
+                <button class="bm-btn" data-basemap="osm">OSM</button>
+              </div>
+            </div>
+
+            <div class="layer-toggle-list">
+              <div class="field-label" style="margin-bottom: 1px;">Visibilitas Layer</div>
+              <label class="toggle-row">
+                <span>Batas Persil Lahan</span>
+                <input id="toggleParcels" type="checkbox" checked />
+              </label>
+              <label class="toggle-row">
+                <span>Trase Rencana (ROW)</span>
+                <input id="toggleRow" type="checkbox" checked />
+              </label>
+              <label class="toggle-row">
+                <span>Label ID Persil</span>
+                <input id="toggleLabels" type="checkbox" checked />
+              </label>
+            </div>
+
+            <div class="map-action-row">
+              <button id="btnFitAll" class="btn btn-sm" title="Zoom ke semua persil tampil">
+                <i data-lucide="scan" width="11" height="11"></i> Fit Persil
+              </button>
+              <button id="btnFitRow" class="btn btn-sm" title="Zoom ke garis trase ROW">
+                <i data-lucide="route" width="11" height="11"></i> Fit ROW
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map Status Legend -->
+        <div class="map-legend">
+          <div class="legend-head">
+            <span>Simbologi Status</span>
+            <span class="mono" style="font-size: 9px; color: var(--accent-cyan);">EPSG:4326</span>
+          </div>
+          <div id="mapLegendRows" class="legend-rows"></div>
+        </div>
+
+        <!-- Live Cursor Coordinates -->
+        <div id="coordTelemetry" class="coord-telemetry mono">LAT -6.54580 | LNG 107.72320</div>
+      </div>
+
+      <!-- Bottom Attribute Table -->
+      <section id="attrDrawer" class="attr-drawer">
+        <div id="attrDrawerHead" class="attr-drawer-head">
+          <div class="attr-head-left">
+            <i data-lucide="table-2" width="14" height="14" style="color: var(--accent-cyan);"></i>
+            <span>Tabel Atribut Persil</span>
+            <span id="tableCountBadge" class="count-pill mono">0 PERSIL</span>
+            <span style="font-size: 10px; font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: 0;">
+              (Klik baris untuk zoom ke bidang)
+            </span>
+          </div>
+          <button id="btnToggleTable" class="btn btn-sm" type="button">
+            <i id="tableChevronIcon" data-lucide="chevron-down" width="13" height="13"></i>
+            <span id="tableToggleLabel">Collapse</span>
+          </button>
+        </div>
+
+        <div class="attr-table-scroll">
+          <table class="attr-table">
+            <thead>
+              <tr>
+                <th data-sort="id_bidang">ID Bidang ↕</th>
+                <th data-sort="nama_pemilik">Nama Pemilik ↕</th>
+                <th data-sort="desa">Desa/Kelurahan ↕</th>
+                <th data-sort="luas_m2">Luas (m²) ↕</th>
+                <th data-sort="nilai_ugr">Nilai UGR (Rp) ↕</th>
+                <th data-sort="status">Status Akuisisi ↕</th>
+                <th data-sort="progres">Progres ↕</th>
+                <th>Catatan Lapangan</th>
+                <th style="text-align: center;">Peta</th>
+              </tr>
+            </thead>
+            <tbody id="attrTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- RIGHT SIDEBAR: ATTRIBUTE INSPECTOR & REAL-TIME EDITOR -->
+    <aside id="sidebarRight" class="sidebar sidebar-right">
+      <div class="inspector-header">
+        <span class="section-title">
+          <i data-lucide="clipboard-edit" width="13" height="13" style="color: var(--accent-cyan);"></i>
+          Inspeksi & Update Persil
+        </span>
+        <button id="btnCloseInspectorMobile" class="btn btn-sm mobile-only-btn" title="Tutup Panel">
+          <i data-lucide="x" width="13" height="13"></i>
+        </button>
+      </div>
+
+      <div class="sidebar-scroll">
+        <!-- RBAC Active Role Banner -->
+        <div id="rbacBanner" class="rbac-banner role-admin">
+          <span id="rbacBannerIconWrap" style="flex-shrink: 0; margin-top: 1px; display: inline-flex;">
+            <i data-lucide="shield-check" width="16" height="16" style="color: #10b981;"></i>
+          </span>
+          <div>
+            <div id="rbacBannerTitle" style="font-weight: 700; color: var(--text-primary);">Admin / Koordinator</div>
+            <div id="rbacBannerDesc" style="color: var(--text-secondary); font-size: 10.5px;">
+              Akses penuh: ubah semua atribut, nilai UGR, dan import/replace dataset.
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="inspectorEmpty" class="empty-inspector">
+          <i data-lucide="mouse-pointer-click" width="28" height="28" style="color: var(--accent-cyan);"></i>
+          <div style="font-weight: 600; color: var(--text-primary); font-size: 12.5px;">Belum Ada Persil Dipilih</div>
+          <div style="font-size: 11px; line-height: 1.5;">
+            Klik salah satu bidang tanah di peta atau pilih baris pada <strong>Tabel Atribut</strong> di bawah untuk menginspeksi dan memperbarui data secara real-time.
+          </div>
+        </div>
+
+        <!-- Inspector Form (Hidden when no parcel selected) -->
+        <form id="inspectorForm" style="display: none; flex-direction: column; gap: 9px;">
+          <div class="parcel-hero">
+            <div class="parcel-hero-top">
+              <div>
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">ID Bidang Terpilih</div>
+                <div id="inspIdTitle" class="parcel-id-title mono">PRS-001</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 5px;">
+                <span id="inspStatusBadge" class="status-badge st-bebas">Bebas/Lunas</span>
+                <button id="btnZoomSelected" type="button" class="btn btn-icon btn-sm" title="Zoom ke persil ini">
+                  <i data-lucide="crosshair" width="13" height="13"></i>
+                </button>
+                <button id="btnClearSelection" type="button" class="btn btn-icon btn-sm" title="Batalkan pilihan persil">
+                  <i data-lucide="x" width="13" height="13"></i>
+                </button>
+              </div>
+            </div>
+            <div class="parcel-meta-grid">
+              <div class="meta-kv">
+                <span>Centroid Koordinat</span>
+                <strong id="inspCoord" class="mono">-6.545, 107.723</strong>
+              </div>
+              <div class="meta-kv">
+                <span>Luas Konversi (Ha)</span>
+                <strong id="inspHa" class="mono">0,0000 Ha</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-section" style="display: flex; flex-direction: column; gap: 8px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="editIdBidang">
+                <span>ID Bidang</span>
+                <span class="lock-badge"><i data-lucide="lock" width="10" height="10"></i> Kunci Unik</span>
+              </label>
+              <input id="editIdBidang" class="input mono" type="text" disabled />
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="editPemilik">
+                <span>Nama Pemilik</span>
+                <span id="lockPemilik" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Admin</span>
+              </label>
+              <input id="editPemilik" class="input" type="text" required />
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="editDesa">
+                <span>Desa / Kelurahan</span>
+                <span id="lockDesa" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Admin</span>
+              </label>
+              <input id="editDesa" class="input" type="text" required />
+            </div>
+
+            <div class="form-row-2" style="margin-bottom: 0;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="field-label" for="editLuas">
+                  <span>Luas (m²)</span>
+                  <span id="lockLuas" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i></span>
+                </label>
+                <input id="editLuas" class="input mono" type="number" min="1" step="1" required />
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="field-label" for="editUgr">
+                  <span>Nilai UGR (Rp)</span>
+                  <span id="lockUgr" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i></span>
+                </label>
+                <input id="editUgr" class="input mono" type="number" min="0" step="100000" required />
+              </div>
+            </div>
+            <div id="editUgrFormatted" class="mono" style="font-size: 10.5px; color: #fbbf24; text-align: right; margin-top: -4px;">
+              Rp 0
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="editStatus">
+                <span>Status Akuisisi</span>
+                <span id="lockStatus" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Read-Only</span>
+              </label>
+              <select id="editStatus" class="select">
+                <option value="Bebas/Lunas">Bebas/Lunas</option>
+                <option value="Proses Pembayaran UGR">Proses Pembayaran UGR</option>
+                <option value="Negosiasi">Negosiasi</option>
+                <option value="Sengketa/Kendala">Sengketa/Kendala</option>
+                <option value="Belum Diproses">Belum Diproses</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="editProgresRange">
+                <span>Persentase Progres</span>
+                <span id="editProgresText" class="mono" style="color: #67e8f9;">0%</span>
+              </label>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <input id="editProgresRange" type="range" min="0" max="100" step="5" style="flex: 1;" />
+                <input id="editProgresNum" class="input mono" type="number" min="0" max="100" step="1" style="width: 58px; text-align: center; padding: 4px;" />
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="editCatatan">
+                <span>Catatan Lapangan</span>
+                <span id="lockCatatan" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Read-Only</span>
+              </label>
+              <textarea id="editCatatan" class="textarea" placeholder="Tambahkan catatan negosiasi, berkas, atau kendala di lapangan..."></textarea>
+            </div>
+
+            <div id="inspectorActionRow" class="inspector-actions">
+              <button id="btnSaveParcel" type="submit" class="btn btn-success">
+                <i data-lucide="save" width="14" height="14"></i>
+                Simpan & Log Update
+              </button>
+              <button id="btnRevertParcel" type="button" class="btn" title="Kembalikan nilai sebelum edit">
+                <i data-lucide="undo-2" width="14" height="14"></i>
+              </button>
+            </div>
+            <div style="font-size: 10px; color: var(--text-muted); text-align: center;">
+              *Perubahan atribut langsung tersinkron ke peta, KPI, grafik & tabel.
+            </div>
+          </div>
+        </form>
+
+        <!-- Recent Activity Feed -->
+        <section class="panel-section">
+          <div class="section-head">
+            <span class="section-title">
+              <i data-lucide="history" width="13" height="13" style="color: var(--accent-cyan);"></i>
+              Log Aktivitas Sesi
+            </span>
+          </div>
+          <div id="activityLogList" class="activity-log"></div>
+        </section>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- IMPORT MODAL -->
+  <div id="importModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span id="importModalTitle" class="modal-title">
+          <i data-lucide="upload-cloud" width="15" height="15" style="color: var(--accent-cyan);"></i>
+          Import Data Spasial & Atribut
+        </span>
+        <button id="btnCloseImport" class="btn btn-icon btn-sm" type="button">
+          <i data-lucide="x" width="14" height="14"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="format-grid">
+          <div class="format-card">
+            <strong>.GEOJSON / .JSON</strong>
+            Mengganti seluruh layer persil poligon pada peta & dashboard.
+          </div>
+          <div class="format-card">
+            <strong>.ZIP (Shapefile)</strong>
+            Shapefile terkompresi (.shp, .dbf, .prj) via <span class="mono">shpjs</span>.
+          </div>
+          <div class="format-card">
+            <strong>.XLSX (Excel)</strong>
+            Update atribut persil aktif berdasarkan kecocokan kolom ID.
+          </div>
+        </div>
+
+        <div id="importDropzone" class="dropzone">
+          <i data-lucide="file-up" width="28" height="28" style="color: var(--accent-cyan); margin-bottom: 6px;"></i>
+          <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 3px;">
+            Klik atau seret file ke area ini
+          </div>
+          <div style="font-size: 11px; color: var(--text-secondary);">
+            Mendukung <span class="mono">.geojson</span>, <span class="mono">.json</span>, <span class="mono">.zip</span> (Shapefile), dan <span class="mono">.xlsx</span>
+          </div>
+          <input id="importFileInput" type="file" accept=".geojson,.json,.zip,.xlsx" style="display: none;" />
+        </div>
+
+        <div id="importFeedback" style="display: none; padding: 9px 11px; border: 1px solid var(--border-strong); background: rgba(15, 23, 42, 0.8); font-size: 11.5px;"></div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 6px; border-top: 1px solid var(--border-subtle);">
+          <span style="font-size: 11px; color: var(--text-secondary);">Butuh contoh format Excel update ID?</span>
+          <button id="btnDownloadTemplateXlsx" class="btn btn-sm" type="button">
+            <i data-lucide="file-spreadsheet" width="13" height="13"></i>
+            Unduh Template .XLSX
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXPORT MODAL -->
+  <div id="exportModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle">
+    <div class="modal-card" style="max-width: 460px;">
+      <div class="modal-head">
+        <span id="exportModalTitle" class="modal-title">
+          <i data-lucide="download" width="15" height="15" style="color: var(--accent-cyan);"></i>
+          Export Data & Laporan
+        </span>
+        <button id="btnCloseExport" class="btn btn-icon btn-sm" type="button">
+          <i data-lucide="x" width="14" height="14"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div>
+          <div class="field-label" style="margin-bottom: 6px;">Pilih Cakupan Data Export</div>
+          <div class="scope-selector">
+            <div id="scopeFiltered" class="scope-option active" data-scope="filtered">
+              <strong style="font-size: 12px; color: #67e8f9;">Hasil Filter Aktif</strong>
+              <span id="scopeFilteredCount" class="mono" style="font-size: 11px; color: var(--text-secondary);">0 Persil</span>
+            </div>
+            <div id="scopeAll" class="scope-option" data-scope="all">
+              <strong style="font-size: 12px; color: var(--text-primary);">Seluruh Dataset</strong>
+              <span id="scopeAllCount" class="mono" style="font-size: 11px; color: var(--text-secondary);">0 Persil</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 4px;">
+          <button id="btnExecExportGeojson" class="btn btn-primary" type="button" style="height: 44px; flex-direction: column; gap: 2px;">
+            <span style="display: flex; align-items: center; gap: 6px;">
+              <i data-lucide="map" width="14" height="14"></i> Export GeoJSON
+            </span>
+            <span style="font-size: 9.5px; opacity: 0.85; font-weight: 400;">Format Spasial (.geojson)</span>
+          </button>
+
+          <button id="btnExecExportExcel" class="btn btn-success" type="button" style="height: 44px; flex-direction: column; gap: 2px;">
+            <span style="display: flex; align-items: center; gap: 6px;">
+              <i data-lucide="file-spreadsheet" width="14" height="14"></i> Export Excel
+            </span>
+            <span style="font-size: 9.5px; opacity: 0.85; font-weight: 400;">Laporan & Rekap (.xlsx)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST STACK -->
+  <div id="toastStack" class="toast-stack"></div>
+
+  <!-- Application Script -->
+  <script src="assets/js/shared.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
