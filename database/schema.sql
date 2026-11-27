@@ -85,3 +85,7 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_parcels_status ON parcels (status_akuisisi);
 CREATE INDEX idx_parcels_desa ON parcels (desa_kelurahan);
 CREATE INDEX idx_users_role ON users (role);
+
+-- Akun Admin Dummy Sementara
+INSERT INTO admins (id, nama_lengkap, username, email, password_hash, jabatan, is_active)
+VALUES ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'Koordinator Pengadaan Tanah', TRUE);

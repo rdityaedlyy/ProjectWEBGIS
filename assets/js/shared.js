@@ -207,8 +207,24 @@
   }
 
   // =========================================================================
-  // DEFAULT EMPTY CONFIG (ZERO DUMMY DATA)
+  // DEFAULT CONFIG & TEMPORARY DUMMY ADMIN
   // =========================================================================
+  function getDefaultDummyAdmin() {
+    const nowIso = new Date().toISOString();
+    return [{
+      id: 'ADM-001',
+      nama_lengkap: 'Administrator Sistem',
+      username: 'admin',
+      email: 'admin@landacq.id',
+      password: 'admin123',
+      role: 'admin',
+      jabatan: 'Koordinator Pengadaan Tanah',
+      is_active: true,
+      created_at: nowIso,
+      updated_at: nowIso
+    }];
+  }
+
   function getDefaultProjectConfig() {
     return {
       name: 'Proyek Pengadaan Lahan',
@@ -225,7 +241,13 @@
   // TABLE ACCESSORS: ADMINS, USERS, PARCELS, ROW, PROJECT, LOGS, SESSION
   // =========================================================================
   function loadAdmins() {
-    return readStorageJson(STORAGE_KEYS.admins, () => []);
+    const list = readStorageJson(STORAGE_KEYS.admins, () => []);
+    if (!Array.isArray(list) || list.length === 0) {
+      const seed = getDefaultDummyAdmin();
+      writeStorageJson(STORAGE_KEYS.admins, seed);
+      return seed;
+    }
+    return list;
   }
 
   function saveAdmins(admins) {
