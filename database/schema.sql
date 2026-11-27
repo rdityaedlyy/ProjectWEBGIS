@@ -1,11 +1,11 @@
 -- ============================================================================
 -- LANDACQ // WebGIS Pembebasan Lahan
--- Skema Database Manual (MySQL 8+ / MariaDB / PostgreSQL compatible notes)
--- Tanpa data dummy awal — seluruh data diinput manual atau melalui import.
+-- Skema Database PostgreSQL / Supabase
+-- Jalankan seluruh script ini pada menu SQL Editor di dashboard Supabase.
 -- ============================================================================
 
 -- 1. Tabel Administrator (Tabel terpisah khusus pengelola / koordinator sistem)
-CREATE TABLE admins (
+CREATE TABLE IF NOT EXISTS admins (
   id VARCHAR(20) PRIMARY KEY,
   nama_lengkap VARCHAR(120) NOT NULL,
   username VARCHAR(80) NOT NULL UNIQUE,
@@ -13,12 +13,12 @@ CREATE TABLE admins (
   password_hash VARCHAR(255) NOT NULL,
   jabatan VARCHAR(100) DEFAULT 'Koordinator Pengadaan Tanah',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 2. Tabel Pengguna / User Operasional (Surveyor Lapangan & Viewer Eksekutif)
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(20) PRIMARY KEY,
   nama_lengkap VARCHAR(120) NOT NULL,
   username VARCHAR(80) NOT NULL UNIQUE,
@@ -28,14 +28,14 @@ CREATE TABLE users (
   unit_kerja VARCHAR(100) DEFAULT 'Tim Lapangan',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_by_admin_id VARCHAR(20) NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT fk_users_admin FOREIGN KEY (created_by_admin_id)
     REFERENCES admins(id) ON DELETE SET NULL
 );
 
 -- 3. Tabel Bidang Tanah / Persil Akuisisi Lahan
-CREATE TABLE parcels (
+CREATE TABLE IF NOT EXISTS parcels (
   id_bidang VARCHAR(32) PRIMARY KEY,
   nama_pemilik VARCHAR(150) NOT NULL,
   desa_kelurahan VARCHAR(120) NOT NULL,
@@ -53,39 +53,69 @@ CREATE TABLE parcels (
   catatan_lapangan TEXT,
   geometry_geojson TEXT NOT NULL,
   updated_by_account_id VARCHAR(20) NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 4. Tabel Konfigurasi Proyek & Koridor Trase (ROW)
-CREATE TABLE project_settings (
+CREATE TABLE IF NOT EXISTS project_settings (
   id INT PRIMARY KEY,
   nama_proyek VARCHAR(160) NOT NULL,
   kode_proyek VARCHAR(50) NOT NULL,
   wilayah VARCHAR(150),
   lebar_row_m INT NOT NULL DEFAULT 90,
   target_selesai DATE NULL,
+  center_lat DOUBLE PRECISION DEFAULT -6.5458,
+  center_lng DOUBLE PRECISION DEFAULT 107.7232,
   row_geojson TEXT NULL,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 5. Tabel Log Audit Aktivitas
-CREATE TABLE audit_logs (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   tanggal VARCHAR(20) NOT NULL,
   waktu VARCHAR(20) NOT NULL,
   aktor VARCHAR(120) NOT NULL,
   tipe_akun VARCHAR(20) NOT NULL,
   halaman VARCHAR(40) NOT NULL,
   aktivitas TEXT NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Indeks Pencarian
-CREATE INDEX idx_parcels_status ON parcels (status_akuisisi);
-CREATE INDEX idx_parcels_desa ON parcels (desa_kelurahan);
-CREATE INDEX idx_users_role ON users (role);
+CREATE INDEX IF NOT EXISTS idx_parcels_status ON parcels (status_akuisisi);
+CREATE INDEX IF NOT EXISTS idx_parcels_desa ON parcels (desa_kelurahan);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
 
--- Akun Admin Dummy Sementara
+-- Konfigurasi Proyek Awal & Akun Admin Dummy Sementara
+INSERT INTO project_settings (id, nama_proyek, kode_proyek, wilayah, lebar_row_m)
+VALUES (1, 'Proyek Pengadaan Lahan', 'PRJ-001', 'Belum ditentukan', 90)
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO admins (id, nama_lengkap, username, email, password_hash, jabatan, is_active)
-VALUES ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'Koordinator Pengadaan Tanah', TRUE);
+VALUES ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'Koordinator Pengadaan Tanah', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- Row Level Security (Mode Prototipe WebGIS Frontend-Only)
+-- Catatan: Untuk produksi, batasi policy ini dan gunakan Supabase Auth + Edge Functions / bcrypt.
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE parcels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "prototype_all_admins" ON admins;
+CREATE POLICY "prototype_all_admins" ON admins FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "prototype_all_users" ON users;
+CREATE POLICY "prototype_all_users" ON users FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "prototype_all_parcels" ON parcels;
+CREATE POLICY "prototype_all_parcels" ON parcels FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "prototype_all_project_settings" ON project_settings;
+CREATE POLICY "prototype_all_project_settings" ON project_settings FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "prototype_all_audit_logs" ON audit_logs;
+CREATE POLICY "prototype_all_audit_logs" ON audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
