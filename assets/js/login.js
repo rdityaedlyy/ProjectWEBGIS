@@ -128,6 +128,15 @@
       el.sessionResumeBar.classList.remove('show');
     }
 
+    const dbStatus = LStore.getDbStatus();
+    if (!dbStatus.connected && dbStatus.error) {
+      const hint = /42501|permission denied/i.test(dbStatus.error)
+        ? ' Jalankan perintah GRANT di Supabase SQL Editor.'
+        : '';
+      showAlert(`Gagal terhubung ke Supabase: ${dbStatus.error}.${hint}`, 'error');
+      return;
+    }
+
     if (admins.length === 0 && users.length === 0) {
       el.regRole.value = 'admin';
       switchAuthMode('register', true);
@@ -137,7 +146,7 @@
     }
   }
 
-  function loginAndRedirect(account, table) {
+  async function loginAndRedirect(account, table) {
     const role = table === 'admins' ? 'admin' : account.role;
     LStore.saveSession({
       accountId: account.id,
@@ -151,7 +160,11 @@
       loginAt: new Date().toISOString()
     });
 
-    LStore.pushLog(account.nama_lengkap, table, 'Login', `Masuk ke sistem sebagai ${LStore.RBAC_ROLES[role].label}.`);
+    try {
+      await LStore.pushLog(account.nama_lengkap, table, 'Login', `Masuk ke sistem sebagai ${LStore.RBAC_ROLES[role].label}.`);
+    } catch (err) {
+      console.warn('Gagal mencatat log login:', err);
+    }
 
     let target = pendingRedirect || (role === 'admin' ? 'admin.html' : 'peta.html');
     if (target === 'admin.html' && role !== 'admin') {
@@ -164,27 +177,46 @@
     window.location.href = target;
   }
 
-  function handleLoginSubmit(e) {
+  async function handleLoginSubmit(e) {
     e.preventDefault();
+    const submitBtn = el.loginForm.querySelector('button[type="submit"]');
     const identifier = String(el.loginUsername.value || '').trim();
     const pwd = String(el.loginPassword.value || '');
 
-    const result = LStore.authenticateAccount(identifier, pwd);
-    if (!result) {
-      showAlert('Email/username atau kata sandi tidak ditemukan pada tabel admins maupun users.', 'error');
-      return;
-    }
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      if (!LStore.getDbStatus().connected) {
+        await LStore.initDb();
+      }
+      const dbStatus = LStore.getDbStatus();
+      if (!dbStatus.connected) {
+        const hint = /42501|permission denied/i.test(dbStatus.error || '')
+          ? ' Jalankan perintah GRANT di Supabase SQL Editor.'
+          : '';
+        showAlert(`Supabase belum dapat diakses: ${dbStatus.error || 'Koneksi gagal'}.${hint}`, 'error');
+        return;
+      }
 
-    if (result.account.is_active === false) {
-      showAlert('Akun ini sedang dinonaktifkan oleh Administrator.', 'error');
-      return;
-    }
+      const result = LStore.authenticateAccount(identifier, pwd);
+      if (!result) {
+        showAlert('Email/username atau kata sandi tidak ditemukan pada tabel admins maupun users.', 'error');
+        return;
+      }
 
-    loginAndRedirect(result.account, result.table);
+      if (result.account.is_active === false) {
+        showAlert('Akun ini sedang dinonaktifkan oleh Administrator.', 'error');
+        return;
+      }
+
+      await loginAndRedirect(result.account, result.table);
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
   }
 
-  function handleRegisterSubmit(e) {
+  async function handleRegisterSubmit(e) {
     e.preventDefault();
+    const submitBtn = el.registerForm.querySelector('button[type="submit"]');
     const nama_lengkap = String(el.regName.value || '').trim();
     const username = String(el.regUsername.value || '').trim();
     const unit = String(el.regUnit.value || '').trim();
@@ -204,39 +236,63 @@
       showAlert('Konfirmasi kata sandi tidak cocok.', 'error');
       return;
     }
-    if (LStore.isIdentifierTaken(username, username)) {
-      showAlert(`Email/username "${username}" sudah terdaftar di tabel admins/users.`, 'error');
-      return;
-    }
 
-    let createdAccount;
-    let targetTable;
-    if (role === 'admin') {
-      createdAccount = LStore.createAdminRecord({
-        nama_lengkap,
-        username,
-        email: username,
-        password,
-        jabatan: unit || 'Koordinator Pengadaan Tanah',
-        is_active: true
-      });
-      targetTable = 'admins';
-      LStore.pushLog(nama_lengkap, 'admins', 'Register', `Registrasi akun baru ke tabel admins (${createdAccount.id}).`);
-    } else {
-      createdAccount = LStore.createUserRecord({
-        nama_lengkap,
-        username,
-        email: username,
-        password,
-        role,
-        unit_kerja: unit || 'Tim Lapangan',
-        is_active: true
-      });
-      targetTable = 'users';
-      LStore.pushLog(nama_lengkap, 'users', 'Register', `Registrasi akun baru ke tabel users (${createdAccount.id} • ${role}).`);
-    }
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      if (!LStore.getDbStatus().connected) {
+        await LStore.initDb();
+      }
+      const dbStatus = LStore.getDbStatus();
+      if (!dbStatus.connected) {
+        const hint = /42501|permission denied/i.test(dbStatus.error || '')
+          ? ' Jalankan perintah GRANT di Supabase SQL Editor.'
+          : '';
+        showAlert(`Supabase belum dapat diakses: ${dbStatus.error || 'Koneksi gagal'}.${hint}`, 'error');
+        return;
+      }
 
-    loginAndRedirect(createdAccount, targetTable);
+      if (LStore.isIdentifierTaken(username, username)) {
+        showAlert(`Email/username "${username}" sudah terdaftar di tabel admins/users.`, 'error');
+        return;
+      }
+
+      let createdAccount;
+      let targetTable;
+      if (role === 'admin') {
+        createdAccount = await LStore.createAdminRecord({
+          nama_lengkap,
+          username,
+          email: username,
+          password,
+          jabatan: unit || 'Koordinator Pengadaan Tanah',
+          is_active: true
+        });
+        targetTable = 'admins';
+        try {
+          await LStore.pushLog(nama_lengkap, 'admins', 'Register', `Registrasi akun baru ke tabel admins (${createdAccount.id}).`);
+        } catch (_err) {}
+      } else {
+        createdAccount = await LStore.createUserRecord({
+          nama_lengkap,
+          username,
+          email: username,
+          password,
+          role,
+          unit_kerja: unit || 'Tim Lapangan',
+          is_active: true
+        });
+        targetTable = 'users';
+        try {
+          await LStore.pushLog(nama_lengkap, 'users', 'Register', `Registrasi akun baru ke tabel users (${createdAccount.id} • ${role}).`);
+        } catch (_err) {}
+      }
+
+      await loginAndRedirect(createdAccount, targetTable);
+    } catch (err) {
+      showAlert(err.message || 'Gagal menyimpan akun baru ke Supabase.', 'error');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
   }
 
   el.tabBtnLogin.addEventListener('click', () => switchAuthMode('login'));

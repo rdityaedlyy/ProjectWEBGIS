@@ -1,6 +1,13 @@
 (() => {
   'use strict';
 
+  // =========================================================================
+  // SUPABASE CONFIGURATION (REST API v1)
+  // =========================================================================
+  const SUPABASE_URL = 'https://nfpkdnxfedwlpysdcnss.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_lcoOuZ3bfWlAyzvCRA12Gw_i8-NXJCS';
+  const SUPABASE_REST = `${SUPABASE_URL}/rest/v1`;
+
   const STORAGE_KEYS = {
     admins: 'landacq_db_v2_admins',
     users: 'landacq_db_v2_users',
@@ -10,10 +17,6 @@
     session: 'landacq_db_v2_session',
     logs: 'landacq_db_v2_logs'
   };
-
-  const IDB_NAME = 'LANDACQ_MANUAL_DB';
-  const IDB_VERSION = 1;
-  const IDB_STORES = ['admins', 'users', 'parcels', 'settings', 'logs'];
 
   const STATUS_CONFIG = {
     'Bebas/Lunas': {
@@ -96,93 +99,36 @@
   };
 
   // =========================================================================
-  // INDEXEDDB + LOCALSTORAGE SYNCHRONIZED ENGINE
+  // IN-MEMORY CACHE + LOCALSTORAGE MIRROR
   // =========================================================================
-  let idbInstance = null;
   const memoryCache = {
-    parcels: null
+    admins: null,
+    users: null,
+    parcels: null,
+    rowFeatures: null,
+    project: null,
+    logs: null
   };
 
-  function openIndexedDb() {
-    return new Promise(resolve => {
-      if (typeof indexedDB === 'undefined') {
-        resolve(null);
-        return;
-      }
-      try {
-        const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-        req.onupgradeneeded = e => {
-          const db = e.target.result;
-          IDB_STORES.forEach(name => {
-            if (!db.objectStoreNames.contains(name)) {
-              const keyPath = name === 'parcels' ? 'id_bidang' : 'id';
-              db.createObjectStore(name, { keyPath });
-            }
-          });
-        };
-        req.onsuccess = e => {
-          idbInstance = e.target.result;
-          resolve(idbInstance);
-        };
-        req.onerror = () => resolve(null);
-      } catch (_e) {
-        resolve(null);
-      }
-    });
-  }
+  const dbStatus = {
+    connected: false,
+    mode: 'initializing',
+    error: null,
+    lastSyncAt: null
+  };
 
-  function syncStoreToIdb(storeName, records) {
-    if (!idbInstance) return Promise.resolve(false);
-    return new Promise(resolve => {
-      try {
-        const tx = idbInstance.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        store.clear();
-        records.forEach(rec => store.put(rec));
-        tx.oncomplete = () => resolve(true);
-        tx.onerror = () => resolve(false);
-      } catch (_e) {
-        resolve(false);
-      }
-    });
-  }
+  const syncTimers = new Map();
 
-  function readAllFromIdb(storeName) {
-    if (!idbInstance) return Promise.resolve([]);
-    return new Promise(resolve => {
-      try {
-        const tx = idbInstance.transaction(storeName, 'readonly');
-        const req = tx.objectStore(storeName).getAll();
-        req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => resolve([]);
-      } catch (_e) {
-        resolve([]);
-      }
-    });
-  }
-
-  async function initDb() {
-    await openIndexedDb();
-    if (idbInstance) {
-      const idbParcels = await readAllFromIdb('parcels');
-      if (idbParcels.length > 0) {
-        memoryCache.parcels = idbParcels.map(rec => ({
-          type: 'Feature',
-          geometry: rec.geometry,
-          properties: rec.properties
-        }));
-      } else {
-        const lsParcels = readStorageJson(STORAGE_KEYS.parcels, () => []);
-        if (lsParcels.length > 0) {
-          memoryCache.parcels = lsParcels;
-          await syncStoreToIdb('parcels', lsParcels.map(f => ({ id_bidang: f.properties.id_bidang, ...f })));
-        }
-      }
-      await syncStoreToIdb('admins', loadAdmins());
-      await syncStoreToIdb('users', loadUsers());
-      await syncStoreToIdb('logs', loadLogs());
-    }
-    return true;
+  function getDefaultProjectConfig() {
+    return {
+      name: 'Proyek Pengadaan Lahan',
+      code: 'PRJ-001',
+      rowWidth: 90,
+      targetDate: '',
+      region: 'Belum ditentukan',
+      centerLat: -6.5458,
+      centerLng: 107.7232
+    };
   }
 
   function readStorageJson(key, fallbackFactory) {
@@ -201,149 +147,294 @@
       localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (err) {
-      console.warn('localStorage penuh atau tidak tersedia:', err);
+      console.warn('localStorage error:', err);
       return false;
     }
   }
 
   // =========================================================================
-  // DEFAULT CONFIG & TEMPORARY DUMMY ADMIN
+  // SUPABASE REST CLIENT (USES PUBLISHABLE KEY IN apikey HEADER)
   // =========================================================================
-  function getDefaultDummyAdmin() {
-    const nowIso = new Date().toISOString();
-    return [{
-      id: 'ADM-001',
-      nama_lengkap: 'Administrator Sistem',
-      username: 'admin',
-      email: 'admin@landacq.id',
-      password: 'admin123',
-      role: 'admin',
-      jabatan: 'Koordinator Pengadaan Tanah',
-      is_active: true,
-      created_at: nowIso,
-      updated_at: nowIso
-    }];
+  async function sbFetch(path, options = {}) {
+    const { method = 'GET', body, prefer } = options;
+    const headers = {
+      'apikey': SUPABASE_PUBLISHABLE_KEY,
+      'Accept': 'application/json'
+    };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (prefer) {
+      headers['Prefer'] = prefer;
+    }
+
+    const res = await fetch(`${SUPABASE_REST}/${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined
+    });
+
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        if (errJson && errJson.message) {
+          msg = `${errJson.message}${errJson.hint ? ' — ' + errJson.hint : ''}`;
+        }
+      } catch (_e) {
+        // ignore JSON parse failure
+      }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
   }
 
-  function getDefaultProjectConfig() {
+  // =========================================================================
+  // ROW MAPPERS (POSTGRESQL <-> FRONTEND MODELS)
+  // =========================================================================
+  function adminRowToModel(row) {
     return {
-      name: 'Proyek Pengadaan Lahan',
-      code: 'PRJ-001',
-      rowWidth: 90,
-      targetDate: '',
-      region: 'Belum ditentukan',
-      centerLat: -6.5458,
-      centerLng: 107.7232
+      id: row.id,
+      nama_lengkap: row.nama_lengkap,
+      username: row.username,
+      email: row.email,
+      password: row.password_hash,
+      role: 'admin',
+      jabatan: row.jabatan || 'Koordinator Pengadaan Tanah',
+      is_active: row.is_active !== false,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+  }
+
+  function adminModelToRow(obj) {
+    return {
+      id: obj.id,
+      nama_lengkap: obj.nama_lengkap,
+      username: obj.username,
+      email: obj.email,
+      password_hash: obj.password,
+      jabatan: obj.jabatan || 'Koordinator Pengadaan Tanah',
+      is_active: obj.is_active !== false,
+      created_at: obj.created_at || new Date().toISOString(),
+      updated_at: obj.updated_at || new Date().toISOString()
+    };
+  }
+
+  function userRowToModel(row) {
+    return {
+      id: row.id,
+      nama_lengkap: row.nama_lengkap,
+      username: row.username,
+      email: row.email,
+      password: row.password_hash,
+      role: row.role === 'viewer' ? 'viewer' : 'surveyor',
+      unit_kerja: row.unit_kerja || 'Tim Lapangan',
+      is_active: row.is_active !== false,
+      created_by_admin_id: row.created_by_admin_id || null,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+  }
+
+  function userModelToRow(obj) {
+    return {
+      id: obj.id,
+      nama_lengkap: obj.nama_lengkap,
+      username: obj.username,
+      email: obj.email,
+      password_hash: obj.password,
+      role: obj.role === 'viewer' ? 'viewer' : 'surveyor',
+      unit_kerja: obj.unit_kerja || 'Tim Lapangan',
+      is_active: obj.is_active !== false,
+      created_by_admin_id: obj.created_by_admin_id || null,
+      created_at: obj.created_at || new Date().toISOString(),
+      updated_at: obj.updated_at || new Date().toISOString()
+    };
+  }
+
+  function parcelRowToFeature(row) {
+    let geometry = null;
+    try {
+      geometry = typeof row.geometry_geojson === 'string'
+        ? JSON.parse(row.geometry_geojson)
+        : row.geometry_geojson;
+    } catch (_e) {
+      geometry = null;
+    }
+    return {
+      type: 'Feature',
+      geometry,
+      properties: {
+        id_bidang: row.id_bidang,
+        nama_pemilik: row.nama_pemilik,
+        desa: row.desa_kelurahan,
+        luas_m2: Math.max(1, Number(row.luas_m2) || 1),
+        nilai_ugr: Math.max(0, Number(row.nilai_ugr) || 0),
+        status: normalizeStatus(row.status_akuisisi),
+        progres: Math.max(0, Math.min(100, Number(row.persentase_progres) || 0)),
+        catatan: row.catatan_lapangan || '-'
+      }
+    };
+  }
+
+  function featureToParcelRow(feature, updatedBy = null) {
+    const p = feature.properties || {};
+    return {
+      id_bidang: String(p.id_bidang).trim(),
+      nama_pemilik: String(p.nama_pemilik || 'Tanpa Nama').trim(),
+      desa_kelurahan: String(p.desa || 'Wilayah Umum').trim(),
+      luas_m2: Math.max(1, Number(p.luas_m2) || 1),
+      nilai_ugr: Math.max(0, Number(p.nilai_ugr) || 0),
+      status_akuisisi: normalizeStatus(p.status),
+      persentase_progres: Math.max(0, Math.min(100, Math.round(Number(p.progres) || 0))),
+      catatan_lapangan: String(p.catatan || '-'),
+      geometry_geojson: JSON.stringify(feature.geometry),
+      updated_by_account_id: updatedBy || null,
+      updated_at: new Date().toISOString()
+    };
+  }
+
+  function projectRowToModel(row) {
+    if (!row) return { project: getDefaultProjectConfig(), rowFeatures: [] };
+    let rowFeatures = [];
+    try {
+      rowFeatures = row.row_geojson ? JSON.parse(row.row_geojson) : [];
+      if (!Array.isArray(rowFeatures)) rowFeatures = [];
+    } catch (_e) {
+      rowFeatures = [];
+    }
+    return {
+      project: {
+        name: row.nama_proyek || 'Proyek Pengadaan Lahan',
+        code: row.kode_proyek || 'PRJ-001',
+        rowWidth: Number(row.lebar_row_m) || 90,
+        targetDate: row.target_selesai || '',
+        region: row.wilayah || 'Belum ditentukan',
+        centerLat: Number(row.center_lat ?? -6.5458),
+        centerLng: Number(row.center_lng ?? 107.7232)
+      },
+      rowFeatures
+    };
+  }
+
+  function logRowToModel(row) {
+    return {
+      id: row.id,
+      date: row.tanggal,
+      time: row.waktu,
+      actor: row.aktor,
+      accountType: row.tipe_akun,
+      page: row.halaman,
+      text: row.aktivitas
     };
   }
 
   // =========================================================================
-  // TABLE ACCESSORS: ADMINS, USERS, PARCELS, ROW, PROJECT, LOGS, SESSION
+  // INITIALIZE / HYDRATE FROM SUPABASE
   // =========================================================================
-  function loadAdmins() {
-    const list = readStorageJson(STORAGE_KEYS.admins, () => []);
-    if (!Array.isArray(list) || list.length === 0) {
-      const seed = getDefaultDummyAdmin();
-      writeStorageJson(STORAGE_KEYS.admins, seed);
-      return seed;
+  async function initDb() {
+    try {
+      const [adminsRows, usersRows, parcelRows, projectRows, logRows] = await Promise.all([
+        sbFetch('admins?select=*&order=id.asc'),
+        sbFetch('users?select=*&order=id.asc'),
+        sbFetch('parcels?select=*&order=id_bidang.asc'),
+        sbFetch('project_settings?id=eq.1&select=*'),
+        sbFetch('audit_logs?select=*&order=id.desc&limit=100')
+      ]);
+
+      memoryCache.admins = (adminsRows || []).map(adminRowToModel);
+      memoryCache.users = (usersRows || []).map(userRowToModel);
+      memoryCache.parcels = (parcelRows || []).map(parcelRowToFeature).filter(f => f.geometry);
+
+      const { project, rowFeatures } = projectRowToModel((projectRows || [])[0]);
+      memoryCache.project = project;
+      memoryCache.rowFeatures = rowFeatures;
+      memoryCache.logs = (logRows || []).map(logRowToModel);
+
+      // Mirror snapshot to localStorage cache
+      writeStorageJson(STORAGE_KEYS.admins, memoryCache.admins);
+      writeStorageJson(STORAGE_KEYS.users, memoryCache.users);
+      writeStorageJson(STORAGE_KEYS.parcels, memoryCache.parcels);
+      writeStorageJson(STORAGE_KEYS.project, memoryCache.project);
+      writeStorageJson(STORAGE_KEYS.row, memoryCache.rowFeatures);
+      writeStorageJson(STORAGE_KEYS.logs, memoryCache.logs);
+
+      dbStatus.connected = true;
+      dbStatus.mode = 'supabase';
+      dbStatus.error = null;
+      dbStatus.lastSyncAt = new Date().toISOString();
+      return true;
+    } catch (err) {
+      console.error('Supabase initDb gagal, memuat cache lokal:', err);
+      dbStatus.connected = false;
+      dbStatus.mode = 'error';
+      dbStatus.error = err.message || 'Gagal terhubung ke Supabase';
+
+      memoryCache.admins = readStorageJson(STORAGE_KEYS.admins, () => []);
+      memoryCache.users = readStorageJson(STORAGE_KEYS.users, () => []);
+      memoryCache.parcels = readStorageJson(STORAGE_KEYS.parcels, () => []);
+      memoryCache.project = readStorageJson(STORAGE_KEYS.project, getDefaultProjectConfig);
+      memoryCache.rowFeatures = readStorageJson(STORAGE_KEYS.row, () => []);
+      memoryCache.logs = readStorageJson(STORAGE_KEYS.logs, () => []);
+      return false;
     }
-    return list;
   }
 
-  function saveAdmins(admins) {
-    const ok = writeStorageJson(STORAGE_KEYS.admins, admins);
-    syncStoreToIdb('admins', admins);
-    return ok;
+  function getDbStatus() {
+    return { ...dbStatus };
+  }
+
+  // =========================================================================
+  // SYNCHRONOUS CACHE ACCESSORS (POPULATED BY initDb)
+  // =========================================================================
+  function loadAdmins() {
+    if (Array.isArray(memoryCache.admins)) return memoryCache.admins;
+    return readStorageJson(STORAGE_KEYS.admins, () => []);
   }
 
   function loadUsers() {
+    if (Array.isArray(memoryCache.users)) return memoryCache.users;
     return readStorageJson(STORAGE_KEYS.users, () => []);
   }
 
-  function saveUsers(users) {
-    const ok = writeStorageJson(STORAGE_KEYS.users, users);
-    syncStoreToIdb('users', users);
-    return ok;
-  }
-
   function loadParcels() {
-    if (Array.isArray(memoryCache.parcels)) {
-      return memoryCache.parcels;
-    }
-    const list = readStorageJson(STORAGE_KEYS.parcels, () => []);
-    memoryCache.parcels = list;
-    return list;
-  }
-
-  function saveParcels(parcels) {
-    memoryCache.parcels = parcels;
-    const ok = writeStorageJson(STORAGE_KEYS.parcels, parcels);
-    syncStoreToIdb('parcels', parcels.map(f => ({
-      id_bidang: f.properties.id_bidang,
-      type: 'Feature',
-      properties: f.properties,
-      geometry: f.geometry
-    })));
-    return ok;
+    if (Array.isArray(memoryCache.parcels)) return memoryCache.parcels;
+    return readStorageJson(STORAGE_KEYS.parcels, () => []);
   }
 
   function loadRowFeatures() {
+    if (Array.isArray(memoryCache.rowFeatures)) return memoryCache.rowFeatures;
     return readStorageJson(STORAGE_KEYS.row, () => []);
   }
 
-  function saveRowFeatures(features) {
-    const ok = writeStorageJson(STORAGE_KEYS.row, features);
-    syncStoreToIdb('settings', [
-      { id: 'project', value: loadProjectConfig() },
-      { id: 'row', value: features }
-    ]);
-    return ok;
-  }
-
   function loadProjectConfig() {
+    if (memoryCache.project) return memoryCache.project;
     return readStorageJson(STORAGE_KEYS.project, getDefaultProjectConfig);
   }
 
-  function saveProjectConfig(cfg) {
-    const ok = writeStorageJson(STORAGE_KEYS.project, cfg);
-    syncStoreToIdb('settings', [
-      { id: 'project', value: cfg },
-      { id: 'row', value: loadRowFeatures() }
-    ]);
-    return ok;
-  }
-
   function loadLogs() {
+    if (Array.isArray(memoryCache.logs)) return memoryCache.logs;
     return readStorageJson(STORAGE_KEYS.logs, () => []);
   }
 
-  function pushLog(actor, accountType, page, text) {
-    const logs = loadLogs();
-    const now = new Date();
-    logs.unshift({
-      id: `LOG-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      time: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      date: now.toLocaleDateString('id-ID'),
-      actor: actor || 'Sistem',
-      accountType: accountType || 'system',
-      page: page || 'App',
-      text
+  // =========================================================================
+  // ASYNC SUPABASE CRUD OPERATIONS
+  // =========================================================================
+  function nextRecordId(records, prefix) {
+    let maxNum = 0;
+    const re = new RegExp(`^${prefix}-(\\d+)$`, 'i');
+    records.forEach(r => {
+      const m = String(r.id || '').match(re);
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
     });
-    if (logs.length > 100) logs.length = 100;
-    writeStorageJson(STORAGE_KEYS.logs, logs);
-    syncStoreToIdb('logs', logs);
-    return logs;
+    return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`;
   }
 
-  function clearLogs() {
-    writeStorageJson(STORAGE_KEYS.logs, []);
-    syncStoreToIdb('logs', []);
-    return [];
-  }
-
-  // =========================================================================
-  // AUTHENTICATION & ACCOUNT HELPERS (SEPARATE ADMINS & USERS TABLES)
-  // =========================================================================
   function isIdentifierTaken(username, email, excludeId = null) {
     const uNorm = String(username || '').trim().toLowerCase();
     const eNorm = String(email || '').trim().toLowerCase();
@@ -356,20 +447,10 @@
     });
   }
 
-  function nextRecordId(records, prefix) {
-    let maxNum = 0;
-    const re = new RegExp(`^${prefix}-(\\d+)$`, 'i');
-    records.forEach(r => {
-      const m = String(r.id || '').match(re);
-      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
-    });
-    return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`;
-  }
-
-  function createAdminRecord({ nama_lengkap, username, email, password, jabatan, is_active = true }) {
+  async function createAdminRecord({ nama_lengkap, username, email, password, jabatan, is_active = true }) {
     const admins = loadAdmins();
     const nowIso = new Date().toISOString();
-    const record = {
+    const model = {
       id: nextRecordId(admins, 'ADM'),
       nama_lengkap: String(nama_lengkap || '').trim(),
       username: String(username || '').trim(),
@@ -381,16 +462,54 @@
       created_at: nowIso,
       updated_at: nowIso
     };
-    admins.push(record);
-    saveAdmins(admins);
-    return record;
+    const inserted = await sbFetch('admins', {
+      method: 'POST',
+      prefer: 'return=representation',
+      body: adminModelToRow(model)
+    });
+    const saved = inserted && inserted[0] ? adminRowToModel(inserted[0]) : model;
+    admins.push(saved);
+    memoryCache.admins = admins;
+    writeStorageJson(STORAGE_KEYS.admins, admins);
+    return saved;
   }
 
-  function createUserRecord({ nama_lengkap, username, email, password, role, unit_kerja, is_active = true, created_by_admin_id = null }) {
+  async function updateAdminRecord(id, fields) {
+    const admins = loadAdmins();
+    const idx = admins.findIndex(a => a.id === id);
+    if (idx === -1) throw new Error('Data admin tidak ditemukan.');
+    const merged = { ...admins[idx], ...fields, updated_at: new Date().toISOString() };
+    const row = adminModelToRow(merged);
+    delete row.id;
+    delete row.created_at;
+    const updated = await sbFetch(`admins?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      prefer: 'return=representation',
+      body: row
+    });
+    admins[idx] = updated && updated[0] ? adminRowToModel(updated[0]) : merged;
+    memoryCache.admins = admins;
+    writeStorageJson(STORAGE_KEYS.admins, admins);
+    return admins[idx];
+  }
+
+  async function deleteAdminRecord(id) {
+    await sbFetch(`admins?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const admins = loadAdmins().filter(a => a.id !== id);
+    memoryCache.admins = admins;
+    writeStorageJson(STORAGE_KEYS.admins, admins);
+    return admins;
+  }
+
+  async function createUserRecord({ nama_lengkap, username, email, password, role, unit_kerja, is_active = true, created_by_admin_id = null }) {
     const users = loadUsers();
     const nowIso = new Date().toISOString();
     const safeRole = role === 'viewer' ? 'viewer' : 'surveyor';
-    const record = {
+    const validCreator = created_by_admin_id && loadAdmins().some(a => a.id === created_by_admin_id)
+      ? created_by_admin_id
+      : null;
+
+    const model = {
       id: nextRecordId(users, 'USR'),
       nama_lengkap: String(nama_lengkap || '').trim(),
       username: String(username || '').trim(),
@@ -399,15 +518,200 @@
       role: safeRole,
       unit_kerja: String(unit_kerja || 'Tim Lapangan').trim(),
       is_active: is_active !== false,
-      created_by_admin_id,
+      created_by_admin_id: validCreator,
       created_at: nowIso,
       updated_at: nowIso
     };
-    users.push(record);
-    saveUsers(users);
-    return record;
+    const inserted = await sbFetch('users', {
+      method: 'POST',
+      prefer: 'return=representation',
+      body: userModelToRow(model)
+    });
+    const saved = inserted && inserted[0] ? userRowToModel(inserted[0]) : model;
+    users.push(saved);
+    memoryCache.users = users;
+    writeStorageJson(STORAGE_KEYS.users, users);
+    return saved;
   }
 
+  async function updateUserRecord(id, fields) {
+    const users = loadUsers();
+    const idx = users.findIndex(u => u.id === id);
+    if (idx === -1) throw new Error('Data user tidak ditemukan.');
+    const merged = { ...users[idx], ...fields, updated_at: new Date().toISOString() };
+    const row = userModelToRow(merged);
+    delete row.id;
+    delete row.created_at;
+    const updated = await sbFetch(`users?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      prefer: 'return=representation',
+      body: row
+    });
+    users[idx] = updated && updated[0] ? userRowToModel(updated[0]) : merged;
+    memoryCache.users = users;
+    writeStorageJson(STORAGE_KEYS.users, users);
+    return users[idx];
+  }
+
+  async function deleteUserRecord(id) {
+    await sbFetch(`users?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const users = loadUsers().filter(u => u.id !== id);
+    memoryCache.users = users;
+    writeStorageJson(STORAGE_KEYS.users, users);
+    return users;
+  }
+
+  async function upsertParcel(feature, updatedBy = null) {
+    const row = featureToParcelRow(feature, updatedBy);
+    await sbFetch('parcels?on_conflict=id_bidang', {
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=representation',
+      body: row
+    });
+    const parcels = loadParcels();
+    const idx = parcels.findIndex(f => f.properties.id_bidang === row.id_bidang);
+    const normalizedFeat = parcelRowToFeature(row);
+    if (idx >= 0) parcels[idx] = normalizedFeat;
+    else parcels.push(normalizedFeat);
+    memoryCache.parcels = parcels;
+    writeStorageJson(STORAGE_KEYS.parcels, parcels);
+    return normalizedFeat;
+  }
+
+  function scheduleParcelSync(feature, updatedBy = null, onError = null) {
+    const id = feature && feature.properties && feature.properties.id_bidang;
+    if (!id) return;
+    writeStorageJson(STORAGE_KEYS.parcels, loadParcels());
+    if (syncTimers.has(id)) clearTimeout(syncTimers.get(id));
+    const timer = setTimeout(async () => {
+      syncTimers.delete(id);
+      try {
+        const row = featureToParcelRow(feature, updatedBy);
+        await sbFetch('parcels?on_conflict=id_bidang', {
+          method: 'POST',
+          prefer: 'resolution=merge-duplicates',
+          body: row
+        });
+      } catch (err) {
+        console.error('Gagal sinkronisasi persil ke Supabase:', err);
+        if (typeof onError === 'function') onError(err);
+      }
+    }, 380);
+    syncTimers.set(id, timer);
+  }
+
+  async function upsertManyParcels(features, updatedBy = null) {
+    const chunkSize = 150;
+    for (let i = 0; i < features.length; i += chunkSize) {
+      const chunk = features.slice(i, i + chunkSize).map(f => featureToParcelRow(f, updatedBy));
+      await sbFetch('parcels?on_conflict=id_bidang', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates',
+        body: chunk
+      });
+    }
+    memoryCache.parcels = features;
+    writeStorageJson(STORAGE_KEYS.parcels, features);
+    return features;
+  }
+
+  async function replaceAllParcels(features, updatedBy = null) {
+    await sbFetch('parcels?id_bidang=not.is.null', { method: 'DELETE' });
+    if (features.length > 0) {
+      await upsertManyParcels(features, updatedBy);
+    } else {
+      memoryCache.parcels = [];
+      writeStorageJson(STORAGE_KEYS.parcels, []);
+    }
+    return features;
+  }
+
+  async function deleteParcelsByIds(ids) {
+    if (!ids || !ids.length) return loadParcels();
+    const encoded = ids.map(id => encodeURIComponent(`"${String(id).replace(/"/g, '')}"`)).join(',');
+    await sbFetch(`parcels?id_bidang=in.(${encoded})`, { method: 'DELETE' });
+    const idSet = new Set(ids);
+    const remaining = loadParcels().filter(f => !idSet.has(f.properties.id_bidang));
+    memoryCache.parcels = remaining;
+    writeStorageJson(STORAGE_KEYS.parcels, remaining);
+    return remaining;
+  }
+
+  async function saveProjectConfig(cfg) {
+    const rowFeatures = loadRowFeatures();
+    const payload = {
+      id: 1,
+      nama_proyek: cfg.name || 'Proyek Pengadaan Lahan',
+      kode_proyek: cfg.code || 'PRJ-001',
+      wilayah: cfg.region || 'Belum ditentukan',
+      lebar_row_m: Math.max(10, parseInt(cfg.rowWidth, 10) || 90),
+      target_selesai: cfg.targetDate ? cfg.targetDate : null,
+      center_lat: Number(cfg.centerLat ?? -6.5458),
+      center_lng: Number(cfg.centerLng ?? 107.7232),
+      row_geojson: JSON.stringify(rowFeatures),
+      updated_at: new Date().toISOString()
+    };
+    await sbFetch('project_settings?on_conflict=id', {
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates',
+      body: payload
+    });
+    memoryCache.project = { ...cfg };
+    writeStorageJson(STORAGE_KEYS.project, memoryCache.project);
+    return memoryCache.project;
+  }
+
+  async function saveRowFeatures(features) {
+    const cfg = loadProjectConfig();
+    memoryCache.rowFeatures = features;
+    writeStorageJson(STORAGE_KEYS.row, features);
+    await saveProjectConfig(cfg);
+    return features;
+  }
+
+  async function pushLog(actor, accountType, page, text) {
+    const now = new Date();
+    const row = {
+      tanggal: now.toLocaleDateString('id-ID'),
+      waktu: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      aktor: actor || 'Sistem',
+      tipe_akun: accountType || 'system',
+      halaman: page || 'App',
+      aktivitas: text
+    };
+    const logs = loadLogs();
+    const localItem = logRowToModel({ id: Date.now(), ...row });
+    logs.unshift(localItem);
+    if (logs.length > 100) logs.length = 100;
+    memoryCache.logs = logs;
+    writeStorageJson(STORAGE_KEYS.logs, logs);
+
+    try {
+      const inserted = await sbFetch('audit_logs', {
+        method: 'POST',
+        prefer: 'return=representation',
+        body: row
+      });
+      if (inserted && inserted[0]) {
+        logs[0] = logRowToModel(inserted[0]);
+        writeStorageJson(STORAGE_KEYS.logs, logs);
+      }
+    } catch (err) {
+      console.warn('Gagal mencatat audit_logs ke Supabase:', err);
+    }
+    return logs;
+  }
+
+  async function clearLogs() {
+    await sbFetch('audit_logs?id=gt.0', { method: 'DELETE' });
+    memoryCache.logs = [];
+    writeStorageJson(STORAGE_KEYS.logs, []);
+    return [];
+  }
+
+  // =========================================================================
+  // AUTHENTICATION & SESSION
+  // =========================================================================
   function authenticateAccount(identifier, password) {
     const idNorm = String(identifier || '').trim().toLowerCase();
     const pwd = String(password || '');
@@ -463,16 +767,20 @@
       window.location.replace(`index.html${nextParam}`);
       return null;
     }
-    // Verify account still exists & active in either admins or users table
+    return session;
+  }
+
+  function verifySessionWithDb(session, currentPage) {
+    if (!session) return false;
     const list = session.table === 'admins' ? loadAdmins() : loadUsers();
     const found = list.find(acc => acc.id === session.accountId);
     if (!found || found.is_active === false) {
       clearSession();
       const nextParam = currentPage ? `?next=${encodeURIComponent(currentPage)}` : '';
       window.location.replace(`index.html${nextParam}`);
-      return null;
+      return false;
     }
-    return session;
+    return true;
   }
 
   // =========================================================================
@@ -565,7 +873,6 @@
       throw new Error('Koordinat poligon wajib diisi.');
     }
 
-    // Try JSON (Polygon geometry or GeoJSON Feature)
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       const parsed = JSON.parse(trimmed);
       if (parsed && parsed.type === 'Feature' && parsed.geometry) {
@@ -586,7 +893,6 @@
       throw new Error('JSON harus berupa Geometry Polygon/MultiPolygon atau array koordinat.');
     }
 
-    // Parse lines of "lat, lng"
     const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     if (lines.length < 3) {
       throw new Error('Minimal masukkan 3 titik koordinat (format: lat, lng per baris).');
@@ -597,7 +903,6 @@
       if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) {
         throw new Error(`Format koordinat tidak valid pada baris ke-${idx + 1}. Gunakan format: -6.5450, 107.7210`);
       }
-      // GeoJSON order is [lng, lat]
       return [parts[1], parts[0]];
     });
 
@@ -730,7 +1035,7 @@
   }
 
   // =========================================================================
-  // SHARED IMPORT / EXPORT / DATABASE BACKUP & TOAST
+  // SHARED IMPORT / EXPORT / BACKUP & TOAST
   // =========================================================================
   function showToast(stackEl, message, type = 'info') {
     if (!stackEl) return;
@@ -941,7 +1246,7 @@
         throw new Error('Library SheetJS (XLSX) gagal dimuat.');
       }
       if (!existingParcels.length) {
-        throw new Error('Belum ada data persil spasial di database. Import GeoJSON/Shapefile atau tambah persil manual terlebih dahulu sebelum update Excel berdasarkan ID.');
+        throw new Error('Belum ada data persil spasial di database. Import GeoJSON/Shapefile atau tambah persil manual terlebih dahulu.');
       }
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
@@ -961,6 +1266,7 @@
         parcelById.set(String(f.properties.id_bidang).trim().toUpperCase(), f);
       });
 
+      const changedFeatures = [];
       let updatedCount = 0;
       let unmatchedCount = 0;
 
@@ -993,6 +1299,7 @@
         if (Number.isFinite(progRaw)) p.progres = Math.max(0, Math.min(100, Math.round(progRaw)));
         if (catatan !== undefined) p.catatan = String(catatan).trim();
 
+        changedFeatures.push(parcel);
         updatedCount++;
       });
 
@@ -1004,6 +1311,7 @@
         mode: 'update',
         sourceLabel: 'Excel (.xlsx)',
         parcels: clonedParcels,
+        changedFeatures,
         updatedCount,
         unmatchedCount
       };
@@ -1040,6 +1348,7 @@
     const dump = {
       schemaVersion: 2,
       exportedAt: new Date().toISOString(),
+      source: SUPABASE_URL,
       tables: {
         admins: loadAdmins(),
         users: loadUsers(),
@@ -1052,7 +1361,7 @@
     triggerBlobDownload(
       JSON.stringify(dump, null, 2),
       'application/json;charset=utf-8',
-      `landacq_database_backup_${new Date().toISOString().slice(0, 10)}.json`
+      `landacq_supabase_backup_${new Date().toISOString().slice(0, 10)}.json`
     );
   }
 
@@ -1063,54 +1372,74 @@
     if (!t || !Array.isArray(t.admins) || !Array.isArray(t.users) || !Array.isArray(t.parcels)) {
       throw new Error('Format file backup database tidak valid (harus memiliki tables.admins, tables.users, tables.parcels).');
     }
-    saveAdmins(t.admins);
-    saveUsers(t.users);
-    saveParcels(t.parcels);
-    if (Array.isArray(t.row_features)) saveRowFeatures(t.row_features);
-    if (t.project_settings) saveProjectConfig(t.project_settings);
-    if (Array.isArray(t.audit_logs)) writeStorageJson(STORAGE_KEYS.logs, t.audit_logs);
+
+    if (t.admins.length > 0) {
+      await sbFetch('admins?on_conflict=id', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates',
+        body: t.admins.map(adminModelToRow)
+      });
+    }
+    if (t.users.length > 0) {
+      await sbFetch('users?on_conflict=id', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates',
+        body: t.users.map(userModelToRow)
+      });
+    }
+    await replaceAllParcels(t.parcels, null);
+    if (Array.isArray(t.row_features)) {
+      memoryCache.rowFeatures = t.row_features;
+    }
+    if (t.project_settings) {
+      await saveProjectConfig(t.project_settings);
+    }
+    await initDb();
     return t;
   }
 
-  function clearOperationalTables(includeAccounts = false) {
-    saveParcels([]);
-    saveRowFeatures([]);
-    clearLogs();
-    if (includeAccounts) {
-      saveAdmins([]);
-      saveUsers([]);
-      saveProjectConfig(getDefaultProjectConfig());
-      clearSession();
-    }
+  async function clearOperationalTables() {
+    await replaceAllParcels([], null);
+    await saveRowFeatures([]);
+    await clearLogs();
   }
 
   window.LANDACQ = {
+    SUPABASE_URL,
     STATUS_CONFIG,
     STATUS_ORDER,
     RBAC_ROLES,
     initDb,
+    getDbStatus,
     getDefaultProjectConfig,
     loadAdmins,
-    saveAdmins,
     loadUsers,
-    saveUsers,
     loadParcels,
-    saveParcels,
     loadRowFeatures,
-    saveRowFeatures,
     loadProjectConfig,
-    saveProjectConfig,
     loadLogs,
+    saveProjectConfig,
+    saveRowFeatures,
     pushLog,
     clearLogs,
     isIdentifierTaken,
     createAdminRecord,
+    updateAdminRecord,
+    deleteAdminRecord,
     createUserRecord,
+    updateUserRecord,
+    deleteUserRecord,
+    upsertParcel,
+    scheduleParcelSync,
+    upsertManyParcels,
+    replaceAllParcels,
+    deleteParcelsByIds,
     authenticateAccount,
     loadSession,
     saveSession,
     clearSession,
     requireAuth,
+    verifySessionWithDb,
     computeGeometryAreaSqm,
     getGeometryCentroid,
     buildRectPolygonFromCenter,

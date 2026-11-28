@@ -119,3 +119,8 @@ CREATE POLICY "prototype_all_project_settings" ON project_settings FOR ALL TO an
 
 DROP POLICY IF EXISTS "prototype_all_audit_logs" ON audit_logs;
 CREATE POLICY "prototype_all_audit_logs" ON audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- Hak akses tabel untuk role anon & authenticated (wajib di Supabase PostgreSQL)
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;

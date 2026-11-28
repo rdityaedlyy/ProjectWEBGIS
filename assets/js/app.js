@@ -163,8 +163,8 @@
     LStore.showToast(el.toastStack, message, type);
   }
 
-  function addActivityLog(text) {
-    state.logs = LStore.pushLog(state.session.name, state.session.table || state.role, 'Peta', text);
+  async function addActivityLog(text) {
+    state.logs = await LStore.pushLog(state.session.name, state.session.table || state.role, 'Peta', text);
     renderActivityLogs();
   }
 
@@ -805,7 +805,9 @@
     el.inspHa.textContent = `${formatNumberID((p.luas_m2 || 0) / 10000, 4)} Ha`;
     el.editUgrFormatted.textContent = formatCurrencyIDR(p.nilai_ugr);
 
-    LStore.saveParcels(state.parcels);
+    LStore.scheduleParcelSync(parcel, state.session.accountId, err => {
+      showToast(`Gagal sinkronisasi ke Supabase: ${err.message}`, 'error');
+    });
 
     if (sourceField === 'desa') {
       refreshFilterControlsMetadata();
@@ -929,8 +931,11 @@
         setImportFeedback('Memproses arsip Shapefile (.zip)...');
       }
       const result = await LStore.parseUploadedDatasetFile(file, state.parcels);
-      state.parcels = result.parcels;
-      LStore.saveParcels(state.parcels);
+      if (result.mode === 'replace') {
+        state.parcels = await LStore.replaceAllParcels(result.parcels, state.session.accountId);
+      } else {
+        state.parcels = await LStore.upsertManyParcels(result.parcels, state.session.accountId);
+      }
 
       if (result.mode === 'replace') {
         state.selectedId = null;
@@ -945,17 +950,17 @@
         syncAll();
         fitAllVisibleParcels(true);
         setImportFeedback(
-          `<strong style="color:#34d399;">Import ${escapeHtml(result.sourceLabel)} berhasil!</strong><br/>Memuat <strong>${result.parcels.length} bidang persil</strong> ke peta & database.`
+          `<strong style="color:#34d399;">Import ${escapeHtml(result.sourceLabel)} berhasil!</strong><br/>Memuat <strong>${result.parcels.length} bidang persil</strong> ke peta & Supabase.`
         );
-        showToast(`Dataset diperbarui: ${result.parcels.length} persil dari ${result.sourceLabel}.`, 'success');
-        addActivityLog(`Import ${result.sourceLabel}: muat ${result.parcels.length} persil.`);
+        showToast(`Dataset diperbarui di Supabase: ${result.parcels.length} persil dari ${result.sourceLabel}.`, 'success');
+        await addActivityLog(`Import ${result.sourceLabel}: muat ${result.parcels.length} persil.`);
       } else {
         refreshFilterControlsMetadata();
         syncAll();
-        const msg = `Berhasil memperbarui <strong>${result.updatedCount} persil</strong> dari Excel.${result.unmatchedCount ? ` (${result.unmatchedCount} ID tidak ditemukan di peta).` : ''}`;
+        const msg = `Berhasil memperbarui <strong>${result.updatedCount} persil</strong> dari Excel ke Supabase.${result.unmatchedCount ? ` (${result.unmatchedCount} ID tidak ditemukan di peta).` : ''}`;
         setImportFeedback(`<span style="color:#34d399;">${msg}</span>`);
-        showToast(`Excel import: ${result.updatedCount} persil diperbarui.`, 'success');
-        addActivityLog(`Import Excel: update atribut ${result.updatedCount} persil.`);
+        showToast(`Excel import tersimpan: ${result.updatedCount} persil diperbarui.`, 'success');
+        await addActivityLog(`Import Excel: update atribut ${result.updatedCount} persil.`);
       }
     } catch (err) {
       console.error(err);
@@ -979,8 +984,10 @@
     addActivityLog(`Switch pratinjau role -> ${RBAC_ROLES[state.role].label}.`);
   });
 
-  el.btnLogout.addEventListener('click', () => {
-    LStore.pushLog(state.session.name, state.session.table || state.role, 'Peta', 'Keluar dari sesi WebGIS.');
+  el.btnLogout.addEventListener('click', async () => {
+    try {
+      await LStore.pushLog(state.session.name, state.session.table || state.role, 'Peta', 'Keluar dari sesi WebGIS.');
+    } catch (_err) {}
     LStore.clearSession();
     window.location.href = 'index.html';
   });
@@ -1124,7 +1131,7 @@
     syncAll();
   });
 
-  el.inspectorForm.addEventListener('submit', e => {
+  el.inspectorForm.addEventListener('submit', async e => {
     e.preventDefault();
     if (!RBAC_ROLES[state.role].canEditField) {
       showToast('Mode Viewer (Read-Only) tidak diizinkan mengubah data.', 'error');
@@ -1132,25 +1139,35 @@
     }
     const parcel = state.parcels.find(f => f.properties.id_bidang === state.selectedId);
     if (!parcel) return;
-    state.parcelSnapshotBeforeEdit = { ...parcel.properties };
-    LStore.saveParcels(state.parcels);
-    showToast(`Perubahan pada ${parcel.properties.id_bidang} (${parcel.properties.status}) tersimpan.`, 'success');
-    addActivityLog(`Update ${parcel.properties.id_bidang}: ${parcel.properties.status} (${parcel.properties.progres}%).`);
+    try {
+      await LStore.upsertParcel(parcel, state.session.accountId);
+      state.parcelSnapshotBeforeEdit = { ...parcel.properties };
+      showToast(`Perubahan pada ${parcel.properties.id_bidang} (${parcel.properties.status}) tersimpan ke Supabase.`, 'success');
+      await addActivityLog(`Update ${parcel.properties.id_bidang}: ${parcel.properties.status} (${parcel.properties.progres}%).`);
+    } catch (err) {
+      showToast(`Gagal menyimpan ke Supabase: ${err.message}`, 'error');
+    }
   });
 
-  el.btnRevertParcel.addEventListener('click', () => {
+  el.btnRevertParcel.addEventListener('click', async () => {
     if (!state.selectedId || !state.parcelSnapshotBeforeEdit) return;
     const parcel = state.parcels.find(f => f.properties.id_bidang === state.selectedId);
     if (!parcel) return;
+    const prevProps = { ...parcel.properties };
     parcel.properties = { ...state.parcelSnapshotBeforeEdit };
-    LStore.saveParcels(state.parcels);
-    refreshFilterControlsMetadata();
-    syncAll();
-    showToast(`Edit pada ${state.selectedId} dikembalikan ke kondisi awal.`, 'info');
+    try {
+      await LStore.upsertParcel(parcel, state.session.accountId);
+      refreshFilterControlsMetadata();
+      syncAll();
+      showToast(`Edit pada ${state.selectedId} dikembalikan ke kondisi awal di Supabase.`, 'info');
+    } catch (err) {
+      parcel.properties = prevProps;
+      showToast(`Gagal mengembalikan perubahan ke Supabase: ${err.message}`, 'error');
+    }
   });
 
   el.btnRefreshDb.addEventListener('click', async () => {
-    await LStore.initDb();
+    const dbOk = await LStore.initDb();
     state.projectCfg = LStore.loadProjectConfig();
     state.parcels = LStore.loadParcels();
     state.rowFeatures = LStore.loadRowFeatures();
@@ -1161,7 +1178,12 @@
     renderActivityLogs();
     syncAll();
     fitAllVisibleParcels(true);
-    showToast(`Data dimuat ulang dari database (${state.parcels.length} persil).`, 'info');
+    if (dbOk) {
+      showToast(`Data disinkronkan dari Supabase (${state.parcels.length} persil).`, 'success');
+    } else {
+      const dbStatus = LStore.getDbStatus();
+      showToast(`Gagal sinkronisasi Supabase: ${dbStatus.error || 'Koneksi terputus'}`, 'error');
+    }
   });
 
   el.btnOpenImport.addEventListener('click', () => {
@@ -1240,7 +1262,10 @@
   // INITIALIZE MAP PAGE
   // =========================================================================
   async function init() {
-    await LStore.initDb();
+    const dbOk = await LStore.initDb();
+    if (dbOk && !LStore.verifySessionWithDb(state.session, 'peta.html')) {
+      return;
+    }
     state.projectCfg = LStore.loadProjectConfig();
     state.parcels = LStore.loadParcels();
     state.rowFeatures = LStore.loadRowFeatures();
@@ -1265,6 +1290,11 @@
       fitRowLayer();
     } else {
       map.setView([state.projectCfg.centerLat || -6.5458, state.projectCfg.centerLng || 107.7232], 14);
+    }
+
+    if (!dbOk) {
+      const dbStatus = LStore.getDbStatus();
+      showToast(`Gagal sinkronisasi Supabase: ${dbStatus.error || 'Menampilkan cache lokal'}`, 'error');
     }
 
     if (typeof lucide !== 'undefined') {

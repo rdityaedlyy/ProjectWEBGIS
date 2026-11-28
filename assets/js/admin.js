@@ -166,8 +166,8 @@
     LStore.showToast(el.toastStack, msg, type);
   }
 
-  function logAction(text, tableName = 'database') {
-    state.logs = LStore.pushLog(state.session.name, tableName, 'Kelola', text);
+  async function logAction(text, tableName = 'database') {
+    state.logs = await LStore.pushLog(state.session.name, tableName, 'Kelola', text);
     renderLogsTable();
     renderSummaryKpis();
   }
@@ -301,7 +301,7 @@
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
-  function saveAdminFromModal(e) {
+  async function saveAdminFromModal(e) {
     e.preventDefault();
     const nama_lengkap = el.amName.value.trim();
     const username = el.amUsername.value.trim();
@@ -315,44 +315,46 @@
       return;
     }
 
-    if (state.editingAdminId) {
-      const idx = state.admins.findIndex(a => a.id === state.editingAdminId);
-      if (idx === -1) return;
-      const otherActiveAdmins = state.admins.filter((a, i) => i !== idx && a.is_active !== false);
-      if (!is_active && otherActiveAdmins.length === 0) {
-        showToast('Minimal harus ada 1 akun Admin aktif di tabel admins.', 'error');
-        return;
+    try {
+      if (state.editingAdminId) {
+        const idx = state.admins.findIndex(a => a.id === state.editingAdminId);
+        if (idx === -1) return;
+        const otherActiveAdmins = state.admins.filter((a, i) => i !== idx && a.is_active !== false);
+        if (!is_active && otherActiveAdmins.length === 0) {
+          showToast('Minimal harus ada 1 akun Admin aktif di tabel admins.', 'error');
+          return;
+        }
+        await LStore.updateAdminRecord(state.editingAdminId, {
+          nama_lengkap,
+          username,
+          email,
+          jabatan,
+          password,
+          is_active
+        });
+        state.admins = LStore.loadAdmins();
+        await logAction(`Edit data admin ${state.editingAdminId} (${username}).`, 'admins');
+        showToast(`Data admin ${nama_lengkap} diperbarui di Supabase.`, 'success');
+      } else {
+        const created = await LStore.createAdminRecord({
+          nama_lengkap,
+          username,
+          email,
+          password,
+          jabatan,
+          is_active
+        });
+        state.admins = LStore.loadAdmins();
+        await logAction(`Tambah admin baru ${created.id} (${username}) ke tabel admins.`, 'admins');
+        showToast(`Admin ${nama_lengkap} ditambahkan ke tabel admins Supabase.`, 'success');
       }
-      state.admins[idx] = {
-        ...state.admins[idx],
-        nama_lengkap,
-        username,
-        email,
-        jabatan,
-        password,
-        is_active,
-        updated_at: new Date().toISOString()
-      };
-      LStore.saveAdmins(state.admins);
-      logAction(`Edit data admin ${state.admins[idx].id} (${username}).`, 'admins');
-      showToast(`Data admin ${nama_lengkap} diperbarui.`, 'success');
-    } else {
-      const created = LStore.createAdminRecord({
-        nama_lengkap,
-        username,
-        email,
-        password,
-        jabatan,
-        is_active
-      });
-      state.admins = LStore.loadAdmins();
-      logAction(`Tambah admin baru ${created.id} (${username}) ke tabel admins.`, 'admins');
-      showToast(`Admin ${nama_lengkap} ditambahkan ke tabel admins.`, 'success');
-    }
 
-    el.adminModal.classList.remove('open');
-    renderSummaryKpis();
-    renderAdminTable();
+      el.adminModal.classList.remove('open');
+      renderSummaryKpis();
+      renderAdminTable();
+    } catch (err) {
+      showToast(`Gagal menyimpan admin: ${err.message}`, 'error');
+    }
   }
 
   // =========================================================================
@@ -432,7 +434,7 @@
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
-  function saveUserFromModal(e) {
+  async function saveUserFromModal(e) {
     e.preventDefault();
     const nama_lengkap = el.umName.value.trim();
     const username = el.umUsername.value.trim();
@@ -447,42 +449,44 @@
       return;
     }
 
-    if (state.editingUserId) {
-      const idx = state.users.findIndex(u => u.id === state.editingUserId);
-      if (idx === -1) return;
-      state.users[idx] = {
-        ...state.users[idx],
-        nama_lengkap,
-        username,
-        email,
-        unit_kerja,
-        role,
-        password,
-        is_active,
-        updated_at: new Date().toISOString()
-      };
-      LStore.saveUsers(state.users);
-      logAction(`Edit data user ${state.users[idx].id} (${username} • ${role}).`, 'users');
-      showToast(`Data user ${nama_lengkap} diperbarui.`, 'success');
-    } else {
-      const created = LStore.createUserRecord({
-        nama_lengkap,
-        username,
-        email,
-        password,
-        role,
-        unit_kerja,
-        is_active,
-        created_by_admin_id: state.session.accountId
-      });
-      state.users = LStore.loadUsers();
-      logAction(`Tambah user baru ${created.id} (${username} • ${role}) ke tabel users.`, 'users');
-      showToast(`User ${nama_lengkap} ditambahkan ke tabel users.`, 'success');
-    }
+    try {
+      if (state.editingUserId) {
+        const idx = state.users.findIndex(u => u.id === state.editingUserId);
+        if (idx === -1) return;
+        await LStore.updateUserRecord(state.editingUserId, {
+          nama_lengkap,
+          username,
+          email,
+          unit_kerja,
+          role,
+          password,
+          is_active
+        });
+        state.users = LStore.loadUsers();
+        await logAction(`Edit data user ${state.editingUserId} (${username} • ${role}).`, 'users');
+        showToast(`Data user ${nama_lengkap} diperbarui di Supabase.`, 'success');
+      } else {
+        const created = await LStore.createUserRecord({
+          nama_lengkap,
+          username,
+          email,
+          password,
+          role,
+          unit_kerja,
+          is_active,
+          created_by_admin_id: state.session.accountId
+        });
+        state.users = LStore.loadUsers();
+        await logAction(`Tambah user baru ${created.id} (${username} • ${role}) ke tabel users.`, 'users');
+        showToast(`User ${nama_lengkap} ditambahkan ke tabel users Supabase.`, 'success');
+      }
 
-    el.userModal.classList.remove('open');
-    renderSummaryKpis();
-    renderUserTable();
+      el.userModal.classList.remove('open');
+      renderSummaryKpis();
+      renderUserTable();
+    } catch (err) {
+      showToast(`Gagal menyimpan user: ${err.message}`, 'error');
+    }
   }
 
   // =========================================================================
@@ -614,7 +618,7 @@
     if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
-  function saveParcelFromModal(e) {
+  async function saveParcelFromModal(e) {
     e.preventDefault();
     let geometry;
     try {
@@ -634,47 +638,60 @@
     const progres = Math.max(0, Math.min(100, parseInt(el.pmProgres.value, 10) || 0));
     const catatan = el.pmCatatan.value.trim() || '-';
 
-    if (state.editingParcelId) {
-      const feat = state.parcels.find(f => f.properties.id_bidang === state.editingParcelId);
-      if (!feat) return;
-      feat.geometry = geometry;
-      feat.properties.desa = desa;
-      feat.properties.nama_pemilik = pemilik;
-      feat.properties.luas_m2 = luas;
-      feat.properties.nilai_ugr = ugr;
-      feat.properties.status = status;
-      feat.properties.progres = progres;
-      feat.properties.catatan = catatan;
-      logAction(`Edit persil ${feat.properties.id_bidang} (${status}).`, 'parcels');
-      showToast(`Persil ${feat.properties.id_bidang} berhasil diperbarui.`, 'success');
-    } else {
-      if (state.parcels.some(f => f.properties.id_bidang.toUpperCase() === idVal.toUpperCase())) {
-        showToast(`ID Bidang ${idVal} sudah terdaftar di tabel parcels.`, 'error');
-        return;
-      }
-      state.parcels.push({
-        type: 'Feature',
-        geometry,
-        properties: {
-          id_bidang: idVal,
-          nama_pemilik: pemilik,
-          desa,
-          luas_m2: luas,
-          nilai_ugr: ugr,
-          status,
-          progres,
-          catatan
+    try {
+      if (state.editingParcelId) {
+        const existing = state.parcels.find(f => f.properties.id_bidang === state.editingParcelId);
+        if (!existing) return;
+        const updatedFeat = {
+          type: 'Feature',
+          geometry,
+          properties: {
+            ...existing.properties,
+            desa,
+            nama_pemilik: pemilik,
+            luas_m2: luas,
+            nilai_ugr: ugr,
+            status,
+            progres,
+            catatan
+          }
+        };
+        await LStore.upsertParcel(updatedFeat, state.session.accountId);
+        state.parcels = LStore.loadParcels();
+        await logAction(`Edit persil ${existing.properties.id_bidang} (${status}).`, 'parcels');
+        showToast(`Persil ${existing.properties.id_bidang} berhasil diperbarui di Supabase.`, 'success');
+      } else {
+        if (state.parcels.some(f => f.properties.id_bidang.toUpperCase() === idVal.toUpperCase())) {
+          showToast(`ID Bidang ${idVal} sudah terdaftar di tabel parcels.`, 'error');
+          return;
         }
-      });
-      logAction(`Tambah persil manual ${idVal} (${pemilik}).`, 'parcels');
-      showToast(`Persil ${idVal} disimpan ke tabel parcels.`, 'success');
-    }
+        const newFeat = {
+          type: 'Feature',
+          geometry,
+          properties: {
+            id_bidang: idVal,
+            nama_pemilik: pemilik,
+            desa,
+            luas_m2: luas,
+            nilai_ugr: ugr,
+            status,
+            progres,
+            catatan
+          }
+        };
+        await LStore.upsertParcel(newFeat, state.session.accountId);
+        state.parcels = LStore.loadParcels();
+        await logAction(`Tambah persil manual ${idVal} (${pemilik}).`, 'parcels');
+        showToast(`Persil ${idVal} disimpan ke tabel parcels Supabase.`, 'success');
+      }
 
-    LStore.saveParcels(state.parcels);
-    el.parcelModal.classList.remove('open');
-    refreshDesaFilterOptions();
-    renderSummaryKpis();
-    renderParcelTable();
+      el.parcelModal.classList.remove('open');
+      refreshDesaFilterOptions();
+      renderSummaryKpis();
+      renderParcelTable();
+    } catch (err) {
+      showToast(`Gagal menyimpan persil: ${err.message}`, 'error');
+    }
   }
 
   // =========================================================================
@@ -695,21 +712,24 @@
     if (!file) return;
     try {
       const result = await LStore.parseUploadedDatasetFile(file, state.parcels);
-      state.parcels = result.parcels;
-      LStore.saveParcels(state.parcels);
+      if (result.mode === 'replace') {
+        state.parcels = await LStore.replaceAllParcels(result.parcels, state.session.accountId);
+      } else {
+        state.parcels = await LStore.upsertManyParcels(result.parcels, state.session.accountId);
+      }
       state.selectedParcelIds.clear();
       refreshDesaFilterOptions();
       renderSummaryKpis();
       renderParcelTable();
 
       const msg = result.mode === 'replace'
-        ? `Import ${escapeHtml(result.sourceLabel)} berhasil: ${result.parcels.length} persil dimuat ke tabel parcels.`
-        : `Import Excel berhasil: ${result.updatedCount} persil diperbarui.`;
+        ? `Import ${escapeHtml(result.sourceLabel)} berhasil: ${result.parcels.length} persil dimuat ke tabel parcels Supabase.`
+        : `Import Excel berhasil: ${result.updatedCount} persil diperbarui di Supabase.`;
       el.admImportFeedback.style.display = 'block';
       el.admImportFeedback.style.borderColor = 'var(--st-bebas)';
       el.admImportFeedback.innerHTML = `<strong style="color:#34d399;">${msg}</strong>`;
       showToast(msg, 'success');
-      logAction(msg, 'parcels');
+      await logAction(msg, 'parcels');
     } catch (err) {
       el.admImportFeedback.style.display = 'block';
       el.admImportFeedback.style.borderColor = 'var(--st-sengketa)';
@@ -767,8 +787,10 @@
     showToast(`Mode pratinjau role diubah ke: ${RBAC_ROLES[state.role].label}`, 'info');
   });
 
-  el.btnLogout.addEventListener('click', () => {
-    LStore.pushLog(state.session.name, state.session.table || 'admins', 'Kelola', 'Keluar dari Konsol Admin.');
+  el.btnLogout.addEventListener('click', async () => {
+    try {
+      await LStore.pushLog(state.session.name, state.session.table || 'admins', 'Kelola', 'Keluar dari Konsol Admin.');
+    } catch (_err) {}
     LStore.clearSession();
     window.location.href = 'index.html';
   });
@@ -783,7 +805,7 @@
   el.btnCancelAdminModal.addEventListener('click', () => el.adminModal.classList.remove('open'));
   el.adminForm.addEventListener('submit', saveAdminFromModal);
 
-  el.admAdminTableBody.addEventListener('click', e => {
+  el.admAdminTableBody.addEventListener('click', async e => {
     const editBtn = e.target.closest('.btn-edit-admin');
     if (editBtn) {
       openAdminModal(editBtn.getAttribute('data-id'));
@@ -801,12 +823,15 @@
         showToast('Minimal harus tersisa 1 Admin aktif di tabel admins.', 'error');
         return;
       }
-      target.is_active = nextActive;
-      target.updated_at = new Date().toISOString();
-      LStore.saveAdmins(state.admins);
-      renderSummaryKpis();
-      renderAdminTable();
-      logAction(`${nextActive ? 'Aktifkan' : 'Nonaktifkan'} admin ${target.username}.`, 'admins');
+      try {
+        await LStore.updateAdminRecord(aid, { is_active: nextActive });
+        state.admins = LStore.loadAdmins();
+        renderSummaryKpis();
+        renderAdminTable();
+        await logAction(`${nextActive ? 'Aktifkan' : 'Nonaktifkan'} admin ${target.username}.`, 'admins');
+      } catch (err) {
+        showToast(`Gagal memperbarui status admin: ${err.message}`, 'error');
+      }
       return;
     }
 
@@ -820,12 +845,15 @@
         showToast('Tidak dapat menghapus satu-satunya Admin aktif.', 'error');
         return;
       }
-      state.admins = state.admins.filter(a => a.id !== aid);
-      LStore.saveAdmins(state.admins);
-      renderSummaryKpis();
-      renderAdminTable();
-      logAction(`Hapus admin ${target.username} dari tabel admins.`, 'admins');
-      showToast(`Admin ${target.nama_lengkap} dihapus.`, 'warn');
+      try {
+        state.admins = await LStore.deleteAdminRecord(aid);
+        renderSummaryKpis();
+        renderAdminTable();
+        await logAction(`Hapus admin ${target.username} dari tabel admins.`, 'admins');
+        showToast(`Admin ${target.nama_lengkap} dihapus dari Supabase.`, 'warn');
+      } catch (err) {
+        showToast(`Gagal menghapus admin: ${err.message}`, 'error');
+      }
     }
   });
 
@@ -843,7 +871,7 @@
   el.btnCancelUserModal.addEventListener('click', () => el.userModal.classList.remove('open'));
   el.userForm.addEventListener('submit', saveUserFromModal);
 
-  el.admUserTableBody.addEventListener('click', e => {
+  el.admUserTableBody.addEventListener('click', async e => {
     const editBtn = e.target.closest('.btn-edit-user');
     if (editBtn) {
       openUserModal(editBtn.getAttribute('data-id'));
@@ -855,12 +883,16 @@
       const uid = toggleBtn.getAttribute('data-id');
       const target = state.users.find(u => u.id === uid);
       if (!target) return;
-      target.is_active = target.is_active === false;
-      target.updated_at = new Date().toISOString();
-      LStore.saveUsers(state.users);
-      renderSummaryKpis();
-      renderUserTable();
-      logAction(`${target.is_active ? 'Aktifkan' : 'Nonaktifkan'} user ${target.username}.`, 'users');
+      const nextActive = target.is_active === false;
+      try {
+        await LStore.updateUserRecord(uid, { is_active: nextActive });
+        state.users = LStore.loadUsers();
+        renderSummaryKpis();
+        renderUserTable();
+        await logAction(`${nextActive ? 'Aktifkan' : 'Nonaktifkan'} user ${target.username}.`, 'users');
+      } catch (err) {
+        showToast(`Gagal memperbarui status user: ${err.message}`, 'error');
+      }
       return;
     }
 
@@ -869,12 +901,15 @@
       const uid = delBtn.getAttribute('data-id');
       const target = state.users.find(u => u.id === uid);
       if (!target) return;
-      state.users = state.users.filter(u => u.id !== uid);
-      LStore.saveUsers(state.users);
-      renderSummaryKpis();
-      renderUserTable();
-      logAction(`Hapus user ${target.username} dari tabel users.`, 'users');
-      showToast(`User ${target.nama_lengkap} dihapus.`, 'warn');
+      try {
+        state.users = await LStore.deleteUserRecord(uid);
+        renderSummaryKpis();
+        renderUserTable();
+        await logAction(`Hapus user ${target.username} dari tabel users.`, 'users');
+        showToast(`User ${target.nama_lengkap} dihapus dari Supabase.`, 'warn');
+      } catch (err) {
+        showToast(`Gagal menghapus user: ${err.message}`, 'error');
+      }
     }
   });
 
@@ -911,7 +946,7 @@
     syncBulkBar();
   });
 
-  el.admParcelTableBody.addEventListener('click', e => {
+  el.admParcelTableBody.addEventListener('click', async e => {
     const editBtn = e.target.closest('.btn-edit-parcel');
     if (editBtn) {
       openParcelModal(editBtn.getAttribute('data-id'));
@@ -920,47 +955,63 @@
     const delBtn = e.target.closest('.btn-del-parcel');
     if (delBtn) {
       const id = delBtn.getAttribute('data-id');
-      state.parcels = state.parcels.filter(f => f.properties.id_bidang !== id);
-      state.selectedParcelIds.delete(id);
-      LStore.saveParcels(state.parcels);
-      refreshDesaFilterOptions();
-      renderSummaryKpis();
-      renderParcelTable();
-      logAction(`Hapus persil ${id}.`, 'parcels');
-      showToast(`Persil ${id} dihapus.`, 'warn');
+      try {
+        state.parcels = await LStore.deleteParcelsByIds([id]);
+        state.selectedParcelIds.delete(id);
+        refreshDesaFilterOptions();
+        renderSummaryKpis();
+        renderParcelTable();
+        await logAction(`Hapus persil ${id}.`, 'parcels');
+        showToast(`Persil ${id} dihapus dari Supabase.`, 'warn');
+      } catch (err) {
+        showToast(`Gagal menghapus persil: ${err.message}`, 'error');
+      }
     }
   });
 
-  el.btnBulkApplyStatus.addEventListener('click', () => {
+  el.btnBulkApplyStatus.addEventListener('click', async () => {
     if (!state.selectedParcelIds.size) return;
     const targetStatus = el.bulkStatusSelect.value;
     let count = 0;
-    state.parcels.forEach(f => {
-      if (state.selectedParcelIds.has(f.properties.id_bidang)) {
-        f.properties.status = targetStatus;
-        if (targetStatus === 'Bebas/Lunas') f.properties.progres = 100;
-        count++;
-      }
+    const nextParcels = state.parcels.map(f => {
+      if (!state.selectedParcelIds.has(f.properties.id_bidang)) return f;
+      count++;
+      return {
+        ...f,
+        properties: {
+          ...f.properties,
+          status: targetStatus,
+          progres: targetStatus === 'Bebas/Lunas' ? 100 : f.properties.progres
+        }
+      };
     });
-    LStore.saveParcels(state.parcels);
-    state.selectedParcelIds.clear();
-    renderSummaryKpis();
-    renderParcelTable();
-    logAction(`Bulk update status ${count} persil -> ${targetStatus}.`, 'parcels');
-    showToast(`${count} persil diubah menjadi ${targetStatus}.`, 'success');
+    try {
+      state.parcels = await LStore.upsertManyParcels(nextParcels, state.session.accountId);
+      state.selectedParcelIds.clear();
+      renderSummaryKpis();
+      renderParcelTable();
+      await logAction(`Bulk update status ${count} persil -> ${targetStatus}.`, 'parcels');
+      showToast(`${count} persil diubah menjadi ${targetStatus} di Supabase.`, 'success');
+    } catch (err) {
+      showToast(`Gagal bulk update: ${err.message}`, 'error');
+    }
   });
 
-  el.btnBulkDelete.addEventListener('click', () => {
-    const count = state.selectedParcelIds.size;
+  el.btnBulkDelete.addEventListener('click', async () => {
+    const ids = Array.from(state.selectedParcelIds);
+    const count = ids.length;
     if (!count) return;
-    state.parcels = state.parcels.filter(f => !state.selectedParcelIds.has(f.properties.id_bidang));
-    state.selectedParcelIds.clear();
-    LStore.saveParcels(state.parcels);
-    refreshDesaFilterOptions();
-    renderSummaryKpis();
-    renderParcelTable();
-    logAction(`Hapus massal ${count} persil terpilih.`, 'parcels');
-    showToast(`${count} persil berhasil dihapus.`, 'warn');
+    try {
+      state.parcels = await LStore.deleteParcelsByIds(ids);
+      state.selectedParcelIds.clear();
+      refreshDesaFilterOptions();
+      renderSummaryKpis();
+      renderParcelTable();
+      await logAction(`Hapus massal ${count} persil terpilih.`, 'parcels');
+      showToast(`${count} persil berhasil dihapus dari Supabase.`, 'warn');
+    } catch (err) {
+      showToast(`Gagal hapus massal: ${err.message}`, 'error');
+    }
   });
 
   // Parcel Modal & Manual Polygon Builder
@@ -994,9 +1045,9 @@
   });
 
   // Project config & spatial/db tools
-  el.projectConfigForm.addEventListener('submit', e => {
+  el.projectConfigForm.addEventListener('submit', async e => {
     e.preventDefault();
-    state.project = {
+    const nextProject = {
       name: el.cfgName.value.trim(),
       code: el.cfgCode.value.trim(),
       rowWidth: Math.max(10, parseInt(el.cfgRowWidth.value, 10) || 90),
@@ -1005,10 +1056,14 @@
       centerLat: Number(el.cfgCenterLat.value) || -6.5458,
       centerLng: Number(el.cfgCenterLng.value) || 107.7232
     };
-    LStore.saveProjectConfig(state.project);
-    applyRbacGuard();
-    logAction(`Update konfigurasi proyek (${state.project.name}).`, 'project_settings');
-    showToast('Konfigurasi proyek tersimpan.', 'success');
+    try {
+      state.project = await LStore.saveProjectConfig(nextProject);
+      applyRbacGuard();
+      await logAction(`Update konfigurasi proyek (${state.project.name}).`, 'project_settings');
+      showToast('Konfigurasi proyek tersimpan di Supabase.', 'success');
+    } catch (err) {
+      showToast(`Gagal menyimpan konfigurasi proyek: ${err.message}`, 'error');
+    }
   });
 
   el.admImportDropzone.addEventListener('click', () => el.admImportFileInput.click());
@@ -1032,11 +1087,10 @@
     if (!file) return;
     try {
       const features = await LStore.parseUploadedRowFile(file);
-      state.rowFeatures = features;
-      LStore.saveRowFeatures(features);
+      state.rowFeatures = await LStore.saveRowFeatures(features);
       renderProjectForm();
-      logAction(`Import layer Trase ROW (${features.length} fitur).`, 'project_settings');
-      showToast(`Trase ROW dimuat (${features.length} fitur).`, 'success');
+      await logAction(`Import layer Trase ROW (${features.length} fitur).`, 'project_settings');
+      showToast(`Trase ROW tersimpan di Supabase (${features.length} fitur).`, 'success');
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -1044,12 +1098,15 @@
     }
   });
 
-  el.admBtnClearRow.addEventListener('click', () => {
-    state.rowFeatures = [];
-    LStore.saveRowFeatures([]);
-    renderProjectForm();
-    logAction('Hapus layer Trase ROW.', 'project_settings');
-    showToast('Layer Trase ROW dikosongkan.', 'info');
+  el.admBtnClearRow.addEventListener('click', async () => {
+    try {
+      state.rowFeatures = await LStore.saveRowFeatures([]);
+      renderProjectForm();
+      await logAction('Hapus layer Trase ROW.', 'project_settings');
+      showToast('Layer Trase ROW dikosongkan di Supabase.', 'info');
+    } catch (err) {
+      showToast(`Gagal mengosongkan ROW: ${err.message}`, 'error');
+    }
   });
 
   el.admBtnExportGeojson.addEventListener('click', () => {
@@ -1111,7 +1168,7 @@
       renderProjectForm();
       renderLogsTable();
       applyRbacGuard();
-      showToast('Database berhasil direstore dari file backup JSON.', 'success');
+      showToast('Database Supabase berhasil direstore dari file backup JSON.', 'success');
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -1119,25 +1176,33 @@
     }
   });
 
-  el.admBtnClearData.addEventListener('click', () => {
-    LStore.clearOperationalTables(false);
-    state.parcels = [];
-    state.rowFeatures = [];
-    state.logs = [];
-    state.selectedParcelIds.clear();
-    refreshDesaFilterOptions();
-    renderSummaryKpis();
-    renderParcelTable();
-    renderProjectForm();
-    renderLogsTable();
-    showToast('Tabel parcels, layer ROW, dan log berhasil dikosongkan.', 'warn');
+  el.admBtnClearData.addEventListener('click', async () => {
+    try {
+      await LStore.clearOperationalTables();
+      state.parcels = [];
+      state.rowFeatures = [];
+      state.logs = [];
+      state.selectedParcelIds.clear();
+      refreshDesaFilterOptions();
+      renderSummaryKpis();
+      renderParcelTable();
+      renderProjectForm();
+      renderLogsTable();
+      showToast('Tabel parcels, layer ROW, dan log berhasil dikosongkan di Supabase.', 'warn');
+    } catch (err) {
+      showToast(`Gagal mengosongkan tabel operasional: ${err.message}`, 'error');
+    }
   });
 
-  el.btnClearLogs.addEventListener('click', () => {
-    state.logs = LStore.clearLogs();
-    renderSummaryKpis();
-    renderLogsTable();
-    showToast('Log audit dibersihkan.', 'info');
+  el.btnClearLogs.addEventListener('click', async () => {
+    try {
+      state.logs = await LStore.clearLogs();
+      renderSummaryKpis();
+      renderLogsTable();
+      showToast('Log audit dibersihkan di Supabase.', 'info');
+    } catch (err) {
+      showToast(`Gagal membersihkan log audit: ${err.message}`, 'error');
+    }
   });
 
   document.addEventListener('keydown', e => {
@@ -1152,7 +1217,10 @@
   // INITIALIZE ADMIN CONSOLE
   // =========================================================================
   async function init() {
-    await LStore.initDb();
+    const dbOk = await LStore.initDb();
+    if (dbOk && !LStore.verifySessionWithDb(state.session, 'admin.html')) {
+      return;
+    }
     state.admins = LStore.loadAdmins();
     state.users = LStore.loadUsers();
     state.parcels = LStore.loadParcels();
@@ -1168,6 +1236,11 @@
     renderParcelTable();
     renderProjectForm();
     renderLogsTable();
+
+    if (!dbOk) {
+      const dbStatus = LStore.getDbStatus();
+      showToast(`Gagal sinkronisasi Supabase: ${dbStatus.error || 'Menampilkan cache lokal'}`, 'error');
+    }
 
     if (typeof lucide !== 'undefined') {
       lucide.createIcons();
