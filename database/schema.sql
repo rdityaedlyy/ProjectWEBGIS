@@ -4,29 +4,29 @@
 -- Jalankan seluruh script ini pada menu SQL Editor di dashboard Supabase.
 -- ============================================================================
 
--- 1. Tabel Master & Administrator
+-- 1. Tabel Kategori Admin (Hierarki: Master > Admin > Staf Ahli)
 CREATE TABLE IF NOT EXISTS admins (
   id VARCHAR(20) PRIMARY KEY,
   nama_lengkap VARCHAR(120) NOT NULL,
   username VARCHAR(80) NOT NULL UNIQUE,
   email VARCHAR(120) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(20) NOT NULL DEFAULT 'admin' CHECK (role IN ('master', 'admin')),
+  role VARCHAR(20) NOT NULL DEFAULT 'staf_ahli' CHECK (role IN ('master', 'admin', 'staf_ahli')),
   jabatan VARCHAR(100) DEFAULT 'Koordinator Pengadaan Tanah',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 2. Tabel Pengguna / User Operasional (Staf Ahli & User)
+-- 2. Tabel Pengguna Umum (User: hanya lihat data)
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(20) PRIMARY KEY,
   nama_lengkap VARCHAR(120) NOT NULL,
   username VARCHAR(80) NOT NULL UNIQUE,
   email VARCHAR(120) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('staf_ahli', 'user', 'surveyor', 'viewer')),
-  unit_kerja VARCHAR(100) DEFAULT 'Tim Lapangan',
+  role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'viewer')),
+  unit_kerja VARCHAR(100) DEFAULT 'Pengguna Umum',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_by_admin_id VARCHAR(20) NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -45,15 +45,36 @@ BEGIN
     ALTER TABLE public.admins ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'admins_role_check'
-  ) THEN
-    ALTER TABLE public.admins ADD CONSTRAINT admins_role_check CHECK (role IN ('master', 'admin'));
-  END IF;
+  ALTER TABLE public.admins DROP CONSTRAINT IF EXISTS admins_role_check;
+  ALTER TABLE public.admins ADD CONSTRAINT admins_role_check CHECK (role IN ('master', 'admin', 'staf_ahli'));
 
-  ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
-  ALTER TABLE public.users ALTER COLUMN role SET DEFAULT 'user';
-  ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('staf_ahli', 'user', 'surveyor', 'viewer'));
+  -- Pindahkan akun Staf Ahli (jika sebelumnya ada di tabel users) ke kategori admins (di bawah Admin)
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+    DROP INDEX IF EXISTS public.uq_single_staf_ahli_role;
+
+    INSERT INTO public.admins (id, nama_lengkap, username, email, password_hash, role, jabatan, is_active, created_at, updated_at)
+    SELECT
+      id,
+      nama_lengkap,
+      username,
+      email,
+      password_hash,
+      'staf_ahli',
+      COALESCE(NULLIF(unit_kerja, ''), 'Staf Ahli Teknis & Data'),
+      is_active,
+      created_at,
+      updated_at
+    FROM public.users
+    WHERE role IN ('staf_ahli', 'surveyor')
+    ON CONFLICT DO NOTHING;
+
+    DELETE FROM public.users WHERE role IN ('staf_ahli', 'surveyor');
+    UPDATE public.users SET role = 'user' WHERE role = 'viewer';
+
+    ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
+    ALTER TABLE public.users ALTER COLUMN role SET DEFAULT 'user';
+    ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'viewer'));
+  END IF;
 END $$;
 
 -- 3. Tabel Bidang Tanah / Persil Akuisisi Lahan
@@ -105,23 +126,19 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indeks Pencarian & Pembatas 1 Akun (1 Master, 1 Admin, 1 Staf Ahli)
+-- Indeks Pencarian & Pembatas 1 Akun (1 Master, 1 Admin, 1 Staf Ahli pada tabel admins)
 CREATE INDEX IF NOT EXISTS idx_parcels_status ON parcels (status_akuisisi);
 CREATE INDEX IF NOT EXISTS idx_parcels_desa ON parcels (desa_kelurahan);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
-
--- Normalisasi role lama sebelum membuat indeks unik tunggal
-UPDATE public.users SET role = 'staf_ahli' WHERE role = 'surveyor';
-UPDATE public.users SET role = 'user' WHERE role = 'viewer';
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_single_master_role
   ON public.admins (role) WHERE role = 'master';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_single_admin_role
   ON public.admins (role) WHERE role = 'admin';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_single_staf_ahli_role
-  ON public.users (role) WHERE role IN ('staf_ahli', 'surveyor');
+  ON public.admins (role) WHERE role = 'staf_ahli';
 
--- Konfigurasi Proyek Awal & Akun Dummy (1 Master, 1 Admin, 1 Staf Ahli, 1 User)
+-- Konfigurasi Proyek Awal & Akun Dummy (Kategori Admin: Master > Admin > Staf Ahli, serta 1 User Publik)
 INSERT INTO project_settings (id, nama_proyek, kode_proyek, wilayah, lebar_row_m, center_lat, center_lng)
 VALUES (1, 'Proyek Pengadaan Lahan', 'PRJ-001', 'Kab. Kutai Kartanegara, Kalimantan Timur', 90, -0.44019, 116.98139)
 ON CONFLICT (id) DO NOTHING;
@@ -136,12 +153,12 @@ WHERE id = 1
 INSERT INTO admins (id, nama_lengkap, username, email, password_hash, role, jabatan, is_active)
 VALUES
   ('MST-001', 'Master Sistem WebGIS', 'master', 'master@landacq.id', 'master123', 'master', 'Master & Super Administrator', TRUE),
-  ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'admin', 'Admin Pengawas & Operasional', TRUE)
+  ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'admin', 'Admin Pengawas & Operasional', TRUE),
+  ('STF-001', 'Staf Ahli Pertanahan', 'stafahli', 'stafahli@landacq.id', 'staf123', 'staf_ahli', 'Staf Ahli Teknis & Data (Di Bawah Admin)', TRUE)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO users (id, nama_lengkap, username, email, password_hash, role, unit_kerja, is_active, created_by_admin_id)
 VALUES
-  ('STF-001', 'Staf Ahli Pertanahan', 'stafahli', 'stafahli@landacq.id', 'staf123', 'staf_ahli', 'Tim Teknis & Akuisisi Data', TRUE, 'MST-001'),
   ('USR-001', 'User Publik WebGIS', 'user', 'user@landacq.id', 'user123', 'user', 'Pengguna Umum', TRUE, 'MST-001')
 ON CONFLICT DO NOTHING;
 

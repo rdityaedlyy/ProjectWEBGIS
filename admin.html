@@ -125,14 +125,14 @@
       <!-- KPI Strip -->
       <section id="adminKpiStrip" class="admin-kpi-strip">
         <div id="kpiCardAdmins" class="kpi-card kpi-green">
-          <div class="kpi-label"><span>Tabel Master &amp; Admin</span><i data-lucide="shield-check" width="12" height="12"></i></div>
+          <div class="kpi-label"><span>Kategori Admin</span><i data-lucide="shield-check" width="12" height="12"></i></div>
           <div id="admKpiAdmins" class="kpi-val mono">0</div>
-          <div id="admKpiAdminsActive" class="kpi-sub">0 akun aktif</div>
+          <div id="admKpiAdminsActive" class="kpi-sub">0 master • 0 admin • 0 staf</div>
         </div>
         <div id="kpiCardUsers" class="kpi-card kpi-blue">
-          <div class="kpi-label"><span>Tabel Users</span><i data-lucide="users" width="12" height="12"></i></div>
+          <div class="kpi-label"><span>Tabel Users (Publik)</span><i data-lucide="users" width="12" height="12"></i></div>
           <div id="admKpiUsers" class="kpi-val mono">0</div>
-          <div id="admKpiUsersBreakdown" class="kpi-sub">0 staf ahli • 0 user</div>
+          <div id="admKpiUsersBreakdown" class="kpi-sub">0 user aktif</div>
         </div>
         <div id="kpiCardParcels" class="kpi-card">
           <div class="kpi-label"><span>Tabel Persil</span><i data-lucide="layers" width="12" height="12"></i></div>
@@ -148,12 +148,12 @@
 
       <!-- TAB 1: TABEL AKUN TERPISAH -->
       <section id="panelAccounts" class="admin-panel active">
-        <!-- TABLE 1: ADMINS (MASTER ONLY) -->
+        <!-- TABLE 1: ADMINS (MASTER > ADMIN > STAF AHLI) -->
         <div id="blockAdminsTable" class="db-table-block admin-accent">
           <div class="db-table-header">
             <div class="db-table-title">
               <i data-lucide="crown" width="16" height="16" style="color: #c084fc;"></i>
-              <span>Tabel Master &amp; Administrator</span>
+              <span id="adminsTableTitleText">Kategori Admin (Master &bull; Admin &bull; Staf Ahli)</span>
               <span class="db-badge-table">TABLE: admins</span>
               <span id="badgeAdminsCount" class="count-pill mono">0 BARIS</span>
             </div>
@@ -161,16 +161,18 @@
             <div class="admin-toolbar-group">
               <div class="input-wrap" style="width: 200px;">
                 <span class="input-icon"><i data-lucide="search" width="12" height="12"></i></span>
-                <input id="admSearchAdmin" class="input with-icon" type="text" placeholder="Cari master/admin..." style="height: 28px; font-size: 11.5px;" />
+                <input id="admSearchAdmin" class="input with-icon" type="text" placeholder="Cari akun admin/staf..." style="height: 28px; font-size: 11.5px;" />
               </div>
               <button id="btnToggleAllAdminPass" class="btn btn-sm" type="button" style="height: 28px;">
                 <i data-lucide="eye" width="12" height="12"></i> Tampilkan Sandi
               </button>
               <button id="btnAddAdmin" class="btn btn-success btn-sm" type="button" style="height: 28px;">
-                <i data-lucide="shield-plus" width="13" height="13"></i> Tambah Master / Admin
+                <i data-lucide="shield-plus" width="13" height="13"></i> Tambah Admin / Staf
               </button>
             </div>
           </div>
+
+          <div id="adminsAccessNote" class="mono" style="font-size: 11px; color: var(--text-secondary); padding: 4px 2px 2px;"></div>
 
           <div class="admin-table-card compact-card">
             <table class="attr-table">
@@ -180,12 +182,12 @@
                   <th>Nama Lengkap</th>
                   <th>Username</th>
                   <th>Email</th>
-                  <th>Role</th>
+                  <th>Role / Level</th>
                   <th>Kata Sandi</th>
                   <th>Jabatan / Divisi</th>
                   <th>Status</th>
                   <th>Dibuat</th>
-                  <th style="text-align: right;">Aksi</th>
+                  <th id="thAdminActions" style="text-align: right;">Aksi</th>
                 </tr>
               </thead>
               <tbody id="admAdminTableBody"></tbody>
@@ -193,26 +195,21 @@
           </div>
         </div>
 
-        <!-- TABLE 2: USERS (STAF AHLI & USER) -->
+        <!-- TABLE 2: USERS (KHUSUS USER / PENGGUNA PUBLIK) -->
         <div id="blockUsersTable" class="db-table-block user-accent">
           <div class="db-table-header">
             <div class="db-table-title">
               <i data-lucide="users" width="16" height="16" style="color: var(--st-bayar);"></i>
-              <span>Tabel Pengguna (Staf Ahli &amp; User)</span>
+              <span>Tabel Pengguna Umum (User)</span>
               <span class="db-badge-table">TABLE: users</span>
               <span id="badgeUsersCount" class="count-pill mono">0 BARIS</span>
             </div>
 
             <div class="admin-toolbar-group">
-              <div class="input-wrap" style="width: 190px;">
+              <div class="input-wrap" style="width: 210px;">
                 <span class="input-icon"><i data-lucide="search" width="12" height="12"></i></span>
-                <input id="admSearchUser" class="input with-icon" type="text" placeholder="Cari nama / email..." style="height: 28px; font-size: 11.5px;" />
+                <input id="admSearchUser" class="input with-icon" type="text" placeholder="Cari nama / email user..." style="height: 28px; font-size: 11.5px;" />
               </div>
-              <select id="admFilterUserRole" class="select" style="width: 165px; height: 28px; padding: 2px 8px; font-size: 11.5px;">
-                <option value="ALL">Semua Role User</option>
-                <option value="staf_ahli">Staf Ahli</option>
-                <option value="user">User / Pengguna</option>
-              </select>
               <button id="btnToggleAllUserPass" class="btn btn-sm" type="button" style="height: 28px;">
                 <i data-lucide="eye" width="12" height="12"></i> Tampilkan Sandi
               </button>
@@ -505,15 +502,16 @@
         </div>
         <div class="form-row-2" style="margin-bottom: 0;">
           <div class="form-group" style="margin-bottom: 0;">
-            <label class="field-label" for="amRole">Role Akun</label>
+            <label class="field-label" for="amRole">Role / Level Admin</label>
             <select id="amRole" class="select">
-              <option value="admin">Admin</option>
               <option value="master">Master (100% Akses)</option>
+              <option value="admin">Admin (Di bawah Master)</option>
+              <option value="staf_ahli">Staf Ahli (Di bawah Admin)</option>
             </select>
           </div>
           <div class="form-group" style="margin-bottom: 0;">
             <label class="field-label" for="amJabatan">Jabatan / Divisi</label>
-            <input id="amJabatan" class="input" type="text" placeholder="Koordinator Pengadaan Tanah" />
+            <input id="amJabatan" class="input" type="text" placeholder="Koordinator / Staf Teknis" />
           </div>
         </div>
         <div class="form-group" style="margin-bottom: 0;">
@@ -567,10 +565,9 @@
             <input id="umUnit" class="input" type="text" placeholder="Tim Lapangan" />
           </div>
           <div class="form-group" style="margin-bottom: 0;">
-            <label class="field-label" for="umRole">Role Operasional</label>
+            <label class="field-label" for="umRole">Role Pengguna</label>
             <select id="umRole" class="select">
-              <option value="staf_ahli">Staf Ahli (Kelola Data)</option>
-              <option value="user" selected>User / Pengguna (Lihat Data)</option>
+              <option value="user" selected>User / Pengguna (Hanya Lihat Data)</option>
             </select>
           </div>
         </div>

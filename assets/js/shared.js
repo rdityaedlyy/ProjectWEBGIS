@@ -149,9 +149,11 @@
   function normalizeAdminRole(rawRole, usernameOrId = '') {
     const val = String(rawRole || '').trim().toLowerCase();
     if (val === 'master') return 'master';
+    if (val === 'staf_ahli' || val === 'staf ahli' || val === 'stafahli' || val === 'surveyor') return 'staf_ahli';
     if (val === 'admin') return 'admin';
     const hint = String(usernameOrId || '').trim().toLowerCase();
     if (hint === 'master' || hint.startsWith('mst-')) return 'master';
+    if (hint === 'stafahli' || hint.startsWith('stf-') || hint.startsWith('staf')) return 'staf_ahli';
     return 'admin';
   }
 
@@ -551,15 +553,20 @@
     });
   }
 
-  async function createAdminRecord({ nama_lengkap, username, email, password, role = 'admin', jabatan, is_active = true }) {
+  async function createAdminRecord({ nama_lengkap, username, email, password, role = 'staf_ahli', jabatan, is_active = true }) {
     const admins = loadAdmins();
     const nowIso = new Date().toISOString();
     const safeRole = normalizeAdminRole(role, username);
     if (admins.some(a => normalizeAdminRole(a.role, a.username || a.id) === safeRole)) {
-      const label = safeRole === 'master' ? 'Master' : 'Admin';
+      const label = (RBAC_ROLES[safeRole] || {}).label || safeRole;
       throw new Error(`Kuota penuh: Role ${label} hanya diperbolehkan 1 akun. Edit akun ${label} yang sudah ada.`);
     }
-    const prefix = safeRole === 'master' ? 'MST' : 'ADM';
+    const prefix = safeRole === 'master' ? 'MST' : safeRole === 'staf_ahli' ? 'STF' : 'ADM';
+    const defaultJabatan = safeRole === 'master'
+      ? 'Master & Super Administrator'
+      : safeRole === 'staf_ahli'
+        ? 'Staf Ahli Teknis & Data'
+        : 'Admin Pengawas & Operasional';
     const model = {
       id: nextRecordId(admins, prefix),
       nama_lengkap: String(nama_lengkap || '').trim(),
@@ -567,7 +574,7 @@
       email: String(email || username || '').trim(),
       password: String(password || ''),
       role: safeRole,
-      jabatan: String(jabatan || (safeRole === 'master' ? 'Super Administrator & Master' : 'Koordinator Pengadaan Tanah')).trim(),
+      jabatan: String(jabatan || defaultJabatan).trim(),
       is_active: is_active !== false,
       created_at: nowIso,
       updated_at: nowIso
@@ -582,14 +589,16 @@
     } catch (err) {
       if (/PGRST204|'role' column/i.test(err.message || '')) {
         schemaCapabilities.adminsHasRole = false;
-        if (safeRole === 'master') {
-          throw new Error('Kolom "role" pada tabel admins Supabase belum ditambahkan. Jalankan script SQL migrasi dari database/schema.sql di SQL Editor Supabase.');
+        if (safeRole !== 'admin') {
+          throw new Error('Kolom "role" pada tabel admins Supabase belum dimigrasi. Jalankan script SQL di database/schema.sql pada SQL Editor Supabase.');
         }
         inserted = await sbFetch('admins', {
           method: 'POST',
           prefer: 'return=representation',
           body: adminModelToRow(model, false)
         });
+      } else if (/admins_role_check|23514/i.test(err.message || '')) {
+        throw new Error(`Role '${safeRole}' belum diizinkan pada constraint admins_role_check di Supabase. Jalankan blok migrasi database/schema.sql di SQL Editor Supabase.`);
       } else {
         throw err;
       }
@@ -608,7 +617,7 @@
     const merged = { ...admins[idx], ...fields, updated_at: new Date().toISOString() };
     merged.role = normalizeAdminRole(merged.role, merged.username || merged.id);
     if (admins.some((a, i) => i !== idx && normalizeAdminRole(a.role, a.username || a.id) === merged.role)) {
-      const label = merged.role === 'master' ? 'Master' : 'Admin';
+      const label = (RBAC_ROLES[merged.role] || {}).label || merged.role;
       throw new Error(`Kuota penuh: Role ${label} hanya diperbolehkan 1 akun.`);
     }
     const buildPayload = includeRole => {
@@ -627,14 +636,16 @@
     } catch (err) {
       if (/PGRST204|'role' column/i.test(err.message || '')) {
         schemaCapabilities.adminsHasRole = false;
-        if (merged.role === 'master') {
-          throw new Error('Kolom "role" pada tabel admins Supabase belum ditambahkan. Jalankan script SQL migrasi dari database/schema.sql di SQL Editor Supabase.');
+        if (merged.role !== 'admin') {
+          throw new Error('Kolom "role" pada tabel admins Supabase belum dimigrasi. Jalankan script SQL di database/schema.sql pada SQL Editor Supabase.');
         }
         updated = await sbFetch(`admins?id=eq.${encodeURIComponent(id)}`, {
           method: 'PATCH',
           prefer: 'return=representation',
           body: buildPayload(false)
         });
+      } else if (/admins_role_check|23514/i.test(err.message || '')) {
+        throw new Error(`Role '${merged.role}' belum diizinkan pada constraint admins_role_check di Supabase. Jalankan blok migrasi database/schema.sql di SQL Editor Supabase.`);
       } else {
         throw err;
       }
@@ -656,23 +667,19 @@
   async function createUserRecord({ nama_lengkap, username, email, password, role = 'user', unit_kerja, is_active = true, created_by_admin_id = null }) {
     const users = loadUsers();
     const nowIso = new Date().toISOString();
-    const safeRole = normalizeUserRole(role);
-    if (safeRole === 'staf_ahli' && users.some(u => normalizeUserRole(u.role) === 'staf_ahli')) {
-      throw new Error('Kuota penuh: Role Staf Ahli hanya diperbolehkan 1 akun. Edit akun Staf Ahli yang sudah ada.');
-    }
-    const prefix = safeRole === 'staf_ahli' ? 'STF' : 'USR';
+    const safeRole = normalizeUserRole(role) === 'staf_ahli' ? 'user' : 'user';
     const validCreator = created_by_admin_id && loadAdmins().some(a => a.id === created_by_admin_id)
       ? created_by_admin_id
       : null;
 
     const model = {
-      id: nextRecordId(users, prefix),
+      id: nextRecordId(users, 'USR'),
       nama_lengkap: String(nama_lengkap || '').trim(),
       username: String(username || '').trim(),
       email: String(email || username || '').trim(),
       password: String(password || ''),
       role: safeRole,
-      unit_kerja: String(unit_kerja || (safeRole === 'staf_ahli' ? 'Tim Staf Ahli' : 'Pengguna Umum')).trim(),
+      unit_kerja: String(unit_kerja || 'Pengguna Umum').trim(),
       is_active: is_active !== false,
       created_by_admin_id: validCreator,
       created_at: nowIso,
@@ -703,10 +710,7 @@
     const idx = users.findIndex(u => u.id === id);
     if (idx === -1) throw new Error('Data user tidak ditemukan.');
     const merged = { ...users[idx], ...fields, updated_at: new Date().toISOString() };
-    merged.role = normalizeUserRole(merged.role);
-    if (merged.role === 'staf_ahli' && users.some((u, i) => i !== idx && normalizeUserRole(u.role) === 'staf_ahli')) {
-      throw new Error('Kuota penuh: Role Staf Ahli hanya diperbolehkan 1 akun.');
-    }
+    merged.role = 'user';
     const row = userModelToRow(merged);
     delete row.id;
     delete row.created_at;
