@@ -50,6 +50,7 @@
     headerUserName: document.getElementById('headerUserName'),
     roleSelect: document.getElementById('roleSelect'),
     roleDot: document.getElementById('roleDot'),
+    btnOpenChangePwd: document.getElementById('btnOpenChangePwd'),
     btnLogout: document.getElementById('btnLogout'),
     rbacGuard: document.getElementById('rbacGuard'),
     guardRoleName: document.getElementById('guardRoleName'),
@@ -1549,6 +1550,22 @@
     renderParcelTable();
     renderProjectForm();
     renderLogsTable();
+
+    LStore.bindChangePasswordUI({
+      buttonEl: el.btnOpenChangePwd,
+      session: state.session,
+      pageName: 'Kelola',
+      toastStack: el.toastStack,
+      onSuccess: () => {
+        state.admins = LStore.loadAdmins();
+        state.users = LStore.loadUsers();
+        state.logs = LStore.loadLogs();
+        renderAdminTable();
+        renderUserTable();
+        renderLogsTable();
+        renderSummaryKpis();
+      }
+    });
 
     if (!dbOk) {
       const dbStatus = LStore.getDbStatus();

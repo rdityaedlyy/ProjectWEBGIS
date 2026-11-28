@@ -56,6 +56,7 @@
     btnOpenImport: document.getElementById('btnOpenImport'),
     btnOpenExport: document.getElementById('btnOpenExport'),
     btnRefreshDb: document.getElementById('btnRefreshDb'),
+    btnOpenChangePwd: document.getElementById('btnOpenChangePwd'),
     btnLogout: document.getElementById('btnLogout'),
     btnToggleLeft: document.getElementById('btnToggleLeft'),
     btnToggleRight: document.getElementById('btnToggleRight'),
@@ -1296,6 +1297,17 @@
     applyRoleUI();
     renderActivityLogs();
     syncAll();
+
+    LStore.bindChangePasswordUI({
+      buttonEl: el.btnOpenChangePwd,
+      session: state.session,
+      pageName: 'Peta',
+      toastStack: el.toastStack,
+      onSuccess: () => {
+        state.logs = LStore.loadLogs();
+        renderActivityLogs();
+      }
+    });
 
     const params = new URLSearchParams(window.location.search);
     const focusId = params.get('focus');

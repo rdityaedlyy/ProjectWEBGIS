@@ -1561,6 +1561,209 @@
     await clearLogs();
   }
 
+  /** Verifies current credentials and updates the signed-in account's own password across any role. */
+  async function changeAccountPassword(session, currentPassword, newPassword) {
+    if (!session || !session.accountId || !session.table) {
+      throw new Error('Sesi akun tidak valid. Silakan masuk ulang.');
+    }
+    const curPwd = String(currentPassword || '');
+    const nextPwd = String(newPassword || '');
+    if (!curPwd) {
+      throw new Error('Kata sandi saat ini wajib diisi.');
+    }
+    if (nextPwd.length < 6) {
+      throw new Error('Kata sandi baru minimal 6 karakter.');
+    }
+    if (nextPwd === curPwd) {
+      throw new Error('Kata sandi baru tidak boleh sama dengan kata sandi saat ini.');
+    }
+
+    const table = session.table === 'admins' ? 'admins' : 'users';
+    const id = session.accountId;
+
+    const rows = await sbFetch(`${table}?id=eq.${encodeURIComponent(id)}&select=id,password_hash,nama_lengkap,username`);
+    const record = Array.isArray(rows) ? rows[0] : null;
+    if (!record) {
+      throw new Error('Akun tidak ditemukan di database Supabase.');
+    }
+    if (String(record.password_hash || '') !== curPwd) {
+      throw new Error('Kata sandi saat ini tidak sesuai.');
+    }
+
+    if (table === 'admins') {
+      await updateAdminRecord(id, { password: nextPwd });
+    } else {
+      await updateUserRecord(id, { password: nextPwd });
+    }
+    return true;
+  }
+
+  /** Lazily mounts and binds one shared Change Password modal usable across WebGIS pages. */
+  function bindChangePasswordUI({ buttonEl, session, pageName, toastStack, onSuccess }) {
+    if (!buttonEl || !session) return;
+
+    let backdrop = document.getElementById('sharedChangePwdModal');
+    if (!backdrop) {
+      backdrop = document.createElement('div');
+      backdrop.id = 'sharedChangePwdModal';
+      backdrop.className = 'modal-backdrop';
+      backdrop.setAttribute('role', 'dialog');
+      backdrop.setAttribute('aria-modal', 'true');
+      backdrop.setAttribute('aria-labelledby', 'sharedChangePwdTitle');
+
+      const roleKey = normalizeAnyRole(session.originRole || session.role);
+      const roleMeta = RBAC_ROLES[roleKey] || RBAC_ROLES.user;
+
+      backdrop.innerHTML = `
+        <div class="modal-card" style="max-width: 440px;">
+          <div class="modal-head">
+            <span id="sharedChangePwdTitle" class="modal-title">
+              <i data-lucide="key-round" width="15" height="15" style="color: var(--accent-cyan);"></i>
+              Ganti Kata Sandi Akun
+            </span>
+            <button id="sharedBtnClosePwdModal" class="btn btn-icon btn-sm" type="button" title="Tutup">
+              <i data-lucide="x" width="14" height="14"></i>
+            </button>
+          </div>
+          <form id="sharedChangePwdForm" class="modal-body">
+            <div style="padding: 8px 10px; background: rgba(15, 23, 42, 0.72); border: 1px solid var(--border-subtle); font-size: 11.5px; display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <strong style="color: var(--text-primary);">${escapeHtml(session.name || '')}</strong>
+                <span class="status-badge" style="border-color: ${roleMeta.color}; color: ${roleMeta.color}; background: rgba(15,23,42,0.85);">
+                  ${escapeHtml(roleMeta.label)}
+                </span>
+              </div>
+              <div class="mono" style="font-size: 10.5px; color: var(--text-secondary);">
+                ${escapeHtml(session.username || '')} &bull; ${escapeHtml(session.email || '')}
+              </div>
+            </div>
+
+            <div id="sharedPwdAlert" style="display: none; padding: 8px 10px; background: rgba(127, 29, 29, 0.35); border: 1px solid rgba(248, 113, 113, 0.5); border-left: 3px solid var(--st-sengketa); color: #fca5a5; font-size: 11.5px;"></div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="sharedCurPwd">Kata Sandi Saat Ini</label>
+              <div class="input-wrap">
+                <input id="sharedCurPwd" class="input mono" type="password" autocomplete="current-password" placeholder="Masukkan kata sandi lama..." style="padding-right: 30px;" required />
+                <button type="button" class="clear-search-btn shared-toggle-pwd" data-target="sharedCurPwd" style="display: flex;" title="Tampilkan/Sembunyikan">
+                  <i data-lucide="eye" width="13" height="13"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="sharedNewPwd">Kata Sandi Baru</label>
+              <div class="input-wrap">
+                <input id="sharedNewPwd" class="input mono" type="password" autocomplete="new-password" minlength="6" placeholder="Minimal 6 karakter" style="padding-right: 30px;" required />
+                <button type="button" class="clear-search-btn shared-toggle-pwd" data-target="sharedNewPwd" style="display: flex;" title="Tampilkan/Sembunyikan">
+                  <i data-lucide="eye" width="13" height="13"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="field-label" for="sharedConfirmPwd">Konfirmasi Kata Sandi Baru</label>
+              <div class="input-wrap">
+                <input id="sharedConfirmPwd" class="input mono" type="password" autocomplete="new-password" minlength="6" placeholder="Ulangi kata sandi baru..." style="padding-right: 30px;" required />
+                <button type="button" class="clear-search-btn shared-toggle-pwd" data-target="sharedConfirmPwd" style="display: flex;" title="Tampilkan/Sembunyikan">
+                  <i data-lucide="eye" width="13" height="13"></i>
+                </button>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px;">
+              <button id="sharedBtnCancelPwdModal" type="button" class="btn">Batal</button>
+              <button id="sharedBtnSubmitPwd" type="submit" class="btn btn-success">
+                <i data-lucide="save" width="14" height="14"></i> Simpan Sandi Baru
+              </button>
+            </div>
+          </form>
+        </div>
+      `;
+      document.body.appendChild(backdrop);
+    }
+
+    const form = backdrop.querySelector('#sharedChangePwdForm');
+    const alertBox = backdrop.querySelector('#sharedPwdAlert');
+    const curInput = backdrop.querySelector('#sharedCurPwd');
+    const newInput = backdrop.querySelector('#sharedNewPwd');
+    const confInput = backdrop.querySelector('#sharedConfirmPwd');
+    const btnClose = backdrop.querySelector('#sharedBtnClosePwdModal');
+    const btnCancel = backdrop.querySelector('#sharedBtnCancelPwdModal');
+    const btnSubmit = backdrop.querySelector('#sharedBtnSubmitPwd');
+
+    function resetModal() {
+      form.reset();
+      [curInput, newInput, confInput].forEach(inp => { inp.type = 'password'; });
+      alertBox.style.display = 'none';
+      alertBox.textContent = '';
+    }
+
+    function openModal() {
+      resetModal();
+      backdrop.classList.add('open');
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+      curInput.focus();
+    }
+
+    function closeModal() {
+      backdrop.classList.remove('open');
+    }
+
+    buttonEl.addEventListener('click', openModal);
+    btnClose.addEventListener('click', closeModal);
+    btnCancel.addEventListener('click', closeModal);
+    backdrop.addEventListener('click', e => {
+      if (e.target === backdrop) closeModal();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && backdrop.classList.contains('open')) {
+        closeModal();
+      }
+    });
+
+    backdrop.querySelectorAll('.shared-toggle-pwd').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetInput = backdrop.querySelector(`#${btn.getAttribute('data-target')}`);
+        if (!targetInput) return;
+        targetInput.type = targetInput.type === 'password' ? 'text' : 'password';
+      });
+    });
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      alertBox.style.display = 'none';
+      const curPwd = curInput.value;
+      const newPwd = newInput.value;
+      const confPwd = confInput.value;
+
+      if (newPwd !== confPwd) {
+        alertBox.textContent = 'Konfirmasi kata sandi baru tidak cocok.';
+        alertBox.style.display = 'block';
+        return;
+      }
+
+      btnSubmit.disabled = true;
+      try {
+        await changeAccountPassword(session, curPwd, newPwd);
+        try {
+          await pushLog(session.name, session.table || session.originRole || 'users', pageName || 'Akun', 'Mengubah kata sandi akun sendiri.');
+        } catch (_err) {}
+        closeModal();
+        if (toastStack) {
+          showToast(toastStack, 'Kata sandi akun berhasil diperbarui di Supabase.', 'success');
+        }
+        if (typeof onSuccess === 'function') {
+          onSuccess();
+        }
+      } catch (err) {
+        alertBox.textContent = err.message || 'Gagal mengganti kata sandi.';
+        alertBox.style.display = 'block';
+      } finally {
+        btnSubmit.disabled = false;
+      }
+    });
+  }
+
   window.LANDACQ = {
     SUPABASE_URL,
     STATUS_CONFIG,
@@ -1586,6 +1789,8 @@
     createUserRecord,
     updateUserRecord,
     deleteUserRecord,
+    changeAccountPassword,
+    bindChangePasswordUI,
     upsertParcel,
     scheduleParcelSync,
     upsertManyParcels,
