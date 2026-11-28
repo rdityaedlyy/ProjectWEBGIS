@@ -792,8 +792,8 @@
   function openParcelModal(parcelId = null) {
     state.editingParcelId = parcelId;
     el.rectHelperBox.style.display = 'none';
-    el.rhLat.value = state.project.centerLat ?? -6.5458;
-    el.rhLng.value = state.project.centerLng ?? 107.7232;
+    el.rhLat.value = state.project.centerLat ?? LStore.DEFAULT_CENTER_LAT;
+    el.rhLng.value = state.project.centerLng ?? LStore.DEFAULT_CENTER_LNG;
 
     if (parcelId) {
       const feat = state.parcels.find(f => f.properties.id_bidang === parcelId);
@@ -912,8 +912,8 @@
     el.cfgRowWidth.value = state.project.rowWidth || 90;
     el.cfgRegion.value = state.project.region || '';
     el.cfgTargetDate.value = state.project.targetDate || '';
-    el.cfgCenterLat.value = state.project.centerLat ?? -6.5458;
-    el.cfgCenterLng.value = state.project.centerLng ?? 107.7232;
+    el.cfgCenterLat.value = state.project.centerLat ?? LStore.DEFAULT_CENTER_LAT;
+    el.cfgCenterLng.value = state.project.centerLng ?? LStore.DEFAULT_CENTER_LNG;
     el.admRowCountLabel.textContent = `${state.rowFeatures.length} fitur`;
   }
 
@@ -1344,8 +1344,8 @@
       rowWidth: Math.max(10, parseInt(el.cfgRowWidth.value, 10) || 90),
       region: el.cfgRegion.value.trim(),
       targetDate: el.cfgTargetDate.value,
-      centerLat: Number(el.cfgCenterLat.value) || -6.5458,
-      centerLng: Number(el.cfgCenterLng.value) || 107.7232
+      centerLat: Number(el.cfgCenterLat.value) || LStore.DEFAULT_CENTER_LAT,
+      centerLng: Number(el.cfgCenterLng.value) || LStore.DEFAULT_CENTER_LNG
     };
     try {
       state.project = await LStore.saveProjectConfig(nextProject);

@@ -29,8 +29,8 @@
   <!-- TOP HEADER -->
   <header class="app-header">
     <div class="header-left">
-      <button id="btnToggleLeft" class="btn btn-icon mobile-only-btn" title="Dashboard & Filter">
-        <i data-lucide="layout-dashboard" width="16" height="16"></i>
+      <button id="btnToggleLeft" class="btn btn-icon panel-toggle-btn is-open" title="Tampilkan / Sembunyikan Panel Kiri">
+        <i data-lucide="panel-left" width="16" height="16"></i>
       </button>
       <div class="brand-mark">
         <i data-lucide="map-pinned" width="17" height="17"></i>
@@ -96,8 +96,8 @@
         <i data-lucide="log-out" width="14" height="14"></i>
       </button>
 
-      <button id="btnToggleRight" class="btn btn-icon mobile-only-btn" title="Panel Inspeksi Persil">
-        <i data-lucide="sliders-horizontal" width="16" height="16"></i>
+      <button id="btnToggleRight" class="btn btn-icon panel-toggle-btn is-open" title="Tampilkan / Sembunyikan Panel Kanan">
+        <i data-lucide="panel-right" width="16" height="16"></i>
       </button>
     </div>
   </header>
@@ -116,7 +116,12 @@
               <i data-lucide="activity" width="13" height="13" style="color: var(--accent-cyan);"></i>
               Dashboard Capaian
             </span>
-            <span id="kpiScopeBadge" class="mono" style="font-size: 10px; color: var(--accent-cyan);">0 / 0 PERSIL</span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span id="kpiScopeBadge" class="mono" style="font-size: 10px; color: var(--accent-cyan);">0 / 0 PERSIL</span>
+              <button id="btnHideLeft" type="button" class="btn btn-icon btn-sm" title="Sembunyikan Panel Kiri" style="width:22px; height:22px;">
+                <i data-lucide="panel-left-close" width="12" height="12"></i>
+              </button>
+            </div>
           </div>
 
           <div class="kpi-grid">
@@ -232,10 +237,22 @@
       </div>
     </aside>
 
+    <div id="resizerLeft" class="panel-resizer" data-side="left" title="Seret untuk atur lebar panel kiri (klik ganda untuk reset)"></div>
+
     <!-- CENTER STAGE: MAP + COLLAPSIBLE ATTRIBUTE TABLE -->
     <main class="center-stage">
       <div class="map-container-wrap">
         <div id="map"></div>
+
+        <!-- Quick Dock Restore Buttons (shown when sidebar collapsed) -->
+        <button id="dockShowLeft" type="button" class="panel-dock-btn panel-dock-left" title="Tampilkan Panel Kiri">
+          <i data-lucide="panel-left-open" width="14" height="14"></i>
+          <span>Dashboard</span>
+        </button>
+        <button id="dockShowRight" type="button" class="panel-dock-btn panel-dock-right" title="Tampilkan Panel Kanan">
+          <i data-lucide="panel-right-open" width="14" height="14"></i>
+          <span>Inspeksi</span>
+        </button>
 
         <!-- Basemap & Layer Floating Control -->
         <div id="mapCtrlPanel" class="map-ctrl-panel">
@@ -295,8 +312,35 @@
           <div id="mapLegendRows" class="legend-rows"></div>
         </div>
 
-        <!-- Live Cursor Coordinates -->
-        <div id="coordTelemetry" class="coord-telemetry mono">LAT -6.54580 | LNG 107.72320</div>
+        <!-- Lower-Third Map Parcel Popup (Center-Out Animated) -->
+        <div id="parcelLowerThird" class="lower-third-popup" role="region" aria-live="polite" aria-label="Detail Bidang Persil">
+          <div class="lt-accent-bar"></div>
+          <div class="lt-inner">
+            <div class="lt-left">
+              <div class="lt-top-row">
+                <span id="ltParcelId" class="lt-id mono">PRS-001</span>
+                <span id="ltParcelStatus" class="status-badge st-bebas">Bebas/Lunas</span>
+                <span id="ltParcelProgres" class="mono" style="font-size:10.5px; color:#67e8f9;">0%</span>
+              </div>
+              <div id="ltParcelOwner" class="lt-owner">-</div>
+              <div id="ltParcelMeta" class="lt-meta mono">-</div>
+            </div>
+            <div class="lt-actions">
+              <button id="ltBtnZoom" type="button" class="btn btn-primary btn-sm" title="Zoom ke Bidang">
+                <i data-lucide="crosshair" width="12" height="12"></i> Zoom
+              </button>
+              <button id="ltBtnInspect" type="button" class="btn btn-sm" title="Buka Panel Kanan">
+                <i data-lucide="sliders-horizontal" width="12" height="12"></i> Detail
+              </button>
+              <button id="ltBtnClose" type="button" class="btn btn-icon btn-sm" title="Tutup Pop-up" style="width:26px;">
+                <i data-lucide="x" width="12" height="12"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Cursor Coordinates (Kab. Kutai Kartanegara, Kaltim) -->
+        <div id="coordTelemetry" class="coord-telemetry mono">LAT -0.44019 | LNG 116.98139</div>
       </div>
 
       <!-- Bottom Attribute Table -->
@@ -337,6 +381,8 @@
       </section>
     </main>
 
+    <div id="resizerRight" class="panel-resizer" data-side="right" title="Seret untuk atur lebar panel kanan (klik ganda untuk reset)"></div>
+
     <!-- RIGHT SIDEBAR: ATTRIBUTE INSPECTOR & REAL-TIME EDITOR -->
     <aside id="sidebarRight" class="sidebar sidebar-right">
       <div class="inspector-header">
@@ -344,8 +390,8 @@
           <i data-lucide="clipboard-edit" width="13" height="13" style="color: var(--accent-cyan);"></i>
           Inspeksi & Update Persil
         </span>
-        <button id="btnCloseInspectorMobile" class="btn btn-sm mobile-only-btn" title="Tutup Panel">
-          <i data-lucide="x" width="13" height="13"></i>
+        <button id="btnCloseInspectorMobile" class="btn btn-icon btn-sm" title="Sembunyikan Panel Kanan" style="width:24px; height:24px;">
+          <i data-lucide="panel-right-close" width="13" height="13"></i>
         </button>
       </div>
 

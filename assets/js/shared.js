@@ -194,15 +194,25 @@
 
   const syncTimers = new Map();
 
+  const DEFAULT_REGION = 'Kab. Kutai Kartanegara, Kalimantan Timur';
+  const DEFAULT_CENTER_LAT = -0.44019;
+  const DEFAULT_CENTER_LNG = 116.98139;
+
+  function isLegacyDefaultCenter(lat, lng, region) {
+    const isOldCoords = Math.abs(Number(lat) - (-6.5458)) < 0.002 && Math.abs(Number(lng) - 107.7232) < 0.002;
+    const reg = String(region || '').trim();
+    return isOldCoords && (!reg || reg === 'Belum ditentukan');
+  }
+
   function getDefaultProjectConfig() {
     return {
       name: 'Proyek Pengadaan Lahan',
       code: 'PRJ-001',
       rowWidth: 90,
       targetDate: '',
-      region: 'Belum ditentukan',
-      centerLat: -6.5458,
-      centerLng: 107.7232
+      region: DEFAULT_REGION,
+      centerLat: DEFAULT_CENTER_LAT,
+      centerLng: DEFAULT_CENTER_LNG
     };
   }
 
@@ -387,15 +397,16 @@
     } catch (_e) {
       rowFeatures = [];
     }
+    const useKukarFallback = isLegacyDefaultCenter(row.center_lat, row.center_lng, row.wilayah);
     return {
       project: {
         name: row.nama_proyek || 'Proyek Pengadaan Lahan',
         code: row.kode_proyek || 'PRJ-001',
         rowWidth: Number(row.lebar_row_m) || 90,
         targetDate: row.target_selesai || '',
-        region: row.wilayah || 'Belum ditentukan',
-        centerLat: Number(row.center_lat ?? -6.5458),
-        centerLng: Number(row.center_lng ?? 107.7232)
+        region: useKukarFallback ? DEFAULT_REGION : (row.wilayah || DEFAULT_REGION),
+        centerLat: useKukarFallback ? DEFAULT_CENTER_LAT : Number(row.center_lat ?? DEFAULT_CENTER_LAT),
+        centerLng: useKukarFallback ? DEFAULT_CENTER_LNG : Number(row.center_lng ?? DEFAULT_CENTER_LNG)
       },
       rowFeatures
     };
@@ -495,8 +506,19 @@
   }
 
   function loadProjectConfig() {
-    if (memoryCache.project) return memoryCache.project;
-    return readStorageJson(STORAGE_KEYS.project, getDefaultProjectConfig);
+    const cfg = memoryCache.project || readStorageJson(STORAGE_KEYS.project, getDefaultProjectConfig);
+    if (isLegacyDefaultCenter(cfg.centerLat, cfg.centerLng, cfg.region)) {
+      const upgraded = {
+        ...cfg,
+        region: DEFAULT_REGION,
+        centerLat: DEFAULT_CENTER_LAT,
+        centerLng: DEFAULT_CENTER_LNG
+      };
+      memoryCache.project = upgraded;
+      writeStorageJson(STORAGE_KEYS.project, upgraded);
+      return upgraded;
+    }
+    return cfg;
   }
 
   function loadLogs() {
@@ -797,11 +819,11 @@
       id: 1,
       nama_proyek: cfg.name || 'Proyek Pengadaan Lahan',
       kode_proyek: cfg.code || 'PRJ-001',
-      wilayah: cfg.region || 'Belum ditentukan',
+      wilayah: cfg.region || DEFAULT_REGION,
       lebar_row_m: Math.max(10, parseInt(cfg.rowWidth, 10) || 90),
       target_selesai: cfg.targetDate ? cfg.targetDate : null,
-      center_lat: Number(cfg.centerLat ?? -6.5458),
-      center_lng: Number(cfg.centerLng ?? 107.7232),
+      center_lat: Number(cfg.centerLat ?? DEFAULT_CENTER_LAT),
+      center_lng: Number(cfg.centerLng ?? DEFAULT_CENTER_LNG),
       row_geojson: JSON.stringify(rowFeatures),
       updated_at: new Date().toISOString()
     };
@@ -981,14 +1003,14 @@
   }
 
   function getGeometryCentroid(geometry) {
-    if (!geometry) return [-6.5458, 107.7232];
+    if (!geometry) return [DEFAULT_CENTER_LAT, DEFAULT_CENTER_LNG];
     let ring = [];
     if (geometry.type === 'Polygon') {
       ring = geometry.coordinates[0] || [];
     } else if (geometry.type === 'MultiPolygon') {
       ring = (geometry.coordinates[0] && geometry.coordinates[0][0]) || [];
     }
-    if (!ring.length) return [-6.5458, 107.7232];
+    if (!ring.length) return [DEFAULT_CENTER_LAT, DEFAULT_CENTER_LNG];
     const len = ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
       ? ring.length - 1
       : ring.length;
@@ -1766,6 +1788,9 @@
 
   window.LANDACQ = {
     SUPABASE_URL,
+    DEFAULT_REGION,
+    DEFAULT_CENTER_LAT,
+    DEFAULT_CENTER_LNG,
     STATUS_CONFIG,
     STATUS_ORDER,
     RBAC_ROLES,

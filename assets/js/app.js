@@ -60,9 +60,24 @@
     btnLogout: document.getElementById('btnLogout'),
     btnToggleLeft: document.getElementById('btnToggleLeft'),
     btnToggleRight: document.getElementById('btnToggleRight'),
+    btnHideLeft: document.getElementById('btnHideLeft'),
     btnCloseInspectorMobile: document.getElementById('btnCloseInspectorMobile'),
+    dockShowLeft: document.getElementById('dockShowLeft'),
+    dockShowRight: document.getElementById('dockShowRight'),
+    resizerLeft: document.getElementById('resizerLeft'),
+    resizerRight: document.getElementById('resizerRight'),
     sidebarLeft: document.getElementById('sidebarLeft'),
     sidebarRight: document.getElementById('sidebarRight'),
+
+    parcelLowerThird: document.getElementById('parcelLowerThird'),
+    ltParcelId: document.getElementById('ltParcelId'),
+    ltParcelStatus: document.getElementById('ltParcelStatus'),
+    ltParcelProgres: document.getElementById('ltParcelProgres'),
+    ltParcelOwner: document.getElementById('ltParcelOwner'),
+    ltParcelMeta: document.getElementById('ltParcelMeta'),
+    ltBtnZoom: document.getElementById('ltBtnZoom'),
+    ltBtnInspect: document.getElementById('ltBtnInspect'),
+    ltBtnClose: document.getElementById('ltBtnClose'),
 
     kpiScopeBadge: document.getElementById('kpiScopeBadge'),
     kpiTotalPersil: document.getElementById('kpiTotalPersil'),
@@ -195,8 +210,8 @@
   // LEAFLET MAP INITIALIZATION & LAYER MANAGEMENT
   // =========================================================================
   const map = L.map('map', {
-    center: [state.projectCfg.centerLat || -6.5458, state.projectCfg.centerLng || 107.7232],
-    zoom: 14,
+    center: [state.projectCfg.centerLat || LStore.DEFAULT_CENTER_LAT, state.projectCfg.centerLng || LStore.DEFAULT_CENTER_LNG],
+    zoom: 12,
     maxZoom: 21,
     zoomControl: true,
     preferCanvas: false
@@ -365,13 +380,13 @@
   function zoomToParcel(idBidang) {
     const layer = parcelLayerMap.get(idBidang);
     if (layer && layer.getBounds) {
-      map.fitBounds(layer.getBounds(), { padding: [55, 55], maxZoom: 18, animate: true });
+      map.flyToBounds(layer.getBounds(), { padding: [55, 55], maxZoom: 18, duration: 0.75, easeLinearity: 0.25 });
     } else {
       const parcel = state.parcels.find(f => f.properties.id_bidang === idBidang);
       if (parcel) {
         const tempBounds = L.geoJSON(parcel).getBounds();
         if (tempBounds.isValid()) {
-          map.fitBounds(tempBounds, { padding: [55, 55], maxZoom: 18, animate: true });
+          map.flyToBounds(tempBounds, { padding: [55, 55], maxZoom: 18, duration: 0.75, easeLinearity: 0.25 });
         }
       }
     }
@@ -388,7 +403,7 @@
     const group = L.featureGroup(list.map(f => L.geoJSON(f)));
     const bounds = group.getBounds();
     if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [36, 36], animate: true });
+      map.flyToBounds(bounds, { padding: [36, 36], duration: 0.75, easeLinearity: 0.25 });
     }
   }
 
@@ -400,7 +415,7 @@
     const group = L.featureGroup(state.rowFeatures.map(f => L.geoJSON(f)));
     const bounds = group.getBounds();
     if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [36, 36], animate: true });
+      map.flyToBounds(bounds, { padding: [36, 36], duration: 0.75, easeLinearity: 0.25 });
     }
   }
 
@@ -459,6 +474,37 @@
     syncAll();
   }
 
+  const kpiAnimFrames = new WeakMap();
+
+  function animateMetric(domEl, targetNum, formatter, duration = 380) {
+    if (!domEl) return;
+    const prev = Number(domEl.dataset.animVal);
+    if (Number.isFinite(prev) && Math.abs(prev - targetNum) < 0.001) {
+      domEl.textContent = formatter(targetNum);
+      return;
+    }
+    if (kpiAnimFrames.has(domEl)) {
+      cancelAnimationFrame(kpiAnimFrames.get(domEl));
+    }
+    const startVal = Number.isFinite(prev) ? prev : 0;
+    const startTime = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - startTime) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const val = startVal + (targetNum - startVal) * eased;
+      domEl.dataset.animVal = String(val);
+      domEl.textContent = formatter(val);
+      if (t < 1) {
+        kpiAnimFrames.set(domEl, requestAnimationFrame(step));
+      } else {
+        domEl.dataset.animVal = String(targetNum);
+        domEl.textContent = formatter(targetNum);
+        kpiAnimFrames.delete(domEl);
+      }
+    }
+    kpiAnimFrames.set(domEl, requestAnimationFrame(step));
+  }
+
   function renderKpiAndChart(filteredParcels) {
     const totalAll = state.parcels.length;
     const count = filteredParcels.length;
@@ -492,15 +538,15 @@
     const bebasPct = totalLuas > 0 ? (bebasLuas / totalLuas) * 100 : 0;
 
     el.kpiScopeBadge.textContent = `${count} / ${totalAll} PERSIL`;
-    el.kpiTotalPersil.textContent = formatNumberID(count);
+    animateMetric(el.kpiTotalPersil, count, v => formatNumberID(Math.round(v)));
     el.kpiTotalPersilSub.textContent = count === totalAll
       ? `${bebasCount} bidang sudah lunas`
       : `terfilter dari ${totalAll} bidang`;
 
-    el.kpiTotalLuas.textContent = `${formatNumberID(totalLuas)} m²`;
+    animateMetric(el.kpiTotalLuas, totalLuas, v => `${formatNumberID(Math.round(v))} m²`);
     el.kpiTotalHa.textContent = `${formatNumberID(totalHa, 2)} Ha`;
 
-    el.kpiBebasPct.textContent = `${formatNumberID(bebasPct, 1)}%`;
+    animateMetric(el.kpiBebasPct, bebasPct, v => `${formatNumberID(v, 1)}%`);
     el.kpiBebasLuas.textContent = `${formatNumberID(bebasLuas)} m² (${formatNumberID(bebasHa, 2)} Ha)`;
     el.kpiBebasBar.style.width = `${Math.min(100, bebasPct).toFixed(1)}%`;
 
@@ -508,7 +554,7 @@
     el.kpiTotalUgrExact.textContent = formatCurrencyIDR(totalUgr);
     el.kpiTotalUgrExact.title = formatCurrencyIDR(totalUgr);
 
-    el.chartCenterPct.textContent = `${formatNumberID(bebasPct, 0)}%`;
+    animateMetric(el.chartCenterPct, bebasPct, v => `${formatNumberID(v, 0)}%`);
 
     statusChart.data.datasets[0].data = STATUS_ORDER.map(s => statusCounts[s]);
     statusChart.update();
@@ -670,14 +716,43 @@
   // =========================================================================
   // INSPECTOR PANEL & REAL-TIME RBAC EDITING
   // =========================================================================
+  function hideParcelLowerThird() {
+    if (!el.parcelLowerThird) return;
+    el.parcelLowerThird.classList.remove('open', 'lt-animate');
+  }
+
+  function showParcelLowerThird(parcel, retriggerAnim = true) {
+    if (!parcel || !el.parcelLowerThird) {
+      hideParcelLowerThird();
+      return;
+    }
+    const p = parcel.properties;
+    const cfg = STATUS_CONFIG[p.status] || STATUS_CONFIG['Belum Diproses'];
+    el.ltParcelId.textContent = p.id_bidang;
+    el.ltParcelStatus.className = `status-badge ${cfg.badgeClass}`;
+    el.ltParcelStatus.textContent = p.status;
+    el.ltParcelProgres.textContent = `${p.progres}%`;
+    el.ltParcelOwner.textContent = p.nama_pemilik || 'Tanpa Nama';
+    el.ltParcelMeta.textContent = `${p.desa || '-'} • ${formatNumberID(p.luas_m2)} m² (${formatNumberID((p.luas_m2 || 0) / 10000, 2)} Ha) • UGR ${formatCompactIDR(p.nilai_ugr)}`;
+
+    el.parcelLowerThird.classList.add('open');
+    if (retriggerAnim) {
+      el.parcelLowerThird.classList.remove('lt-animate');
+      void el.parcelLowerThird.offsetWidth;
+      el.parcelLowerThird.classList.add('lt-animate');
+    }
+  }
+
   function selectParcel(idBidang, shouldZoom = false) {
     const parcel = state.parcels.find(f => f.properties.id_bidang === idBidang);
     if (!parcel) {
       state.selectedId = null;
       state.parcelSnapshotBeforeEdit = null;
+      hideParcelLowerThird();
       renderInspector();
       return;
     }
+    const isNewSelection = state.selectedId !== idBidang || !el.parcelLowerThird.classList.contains('open');
     state.selectedId = idBidang;
     state.parcelSnapshotBeforeEdit = { ...parcel.properties };
 
@@ -699,11 +774,7 @@
     });
 
     renderInspector();
-
-    if (window.innerWidth <= 980) {
-      el.sidebarRight.classList.add('drawer-open');
-      el.sidebarLeft.classList.remove('drawer-open');
-    }
+    showParcelLowerThird(parcel, isNewSelection);
 
     if (shouldZoom) {
       zoomToParcel(idBidang);
@@ -886,6 +957,10 @@
     if (!opts.keepInspectorInputs) {
       renderInspector();
     }
+    if (state.selectedId && el.parcelLowerThird && el.parcelLowerThird.classList.contains('open')) {
+      const activeParcel = state.parcels.find(f => f.properties.id_bidang === state.selectedId);
+      showParcelLowerThird(activeParcel, false);
+    }
   }
 
   // =========================================================================
@@ -1010,17 +1085,177 @@
     window.location.href = 'index.html';
   });
 
-  el.btnToggleLeft.addEventListener('click', () => {
-    el.sidebarLeft.classList.toggle('drawer-open');
-    el.sidebarRight.classList.remove('drawer-open');
+  // =========================================================================
+  // RESIZABLE & COLLAPSIBLE SIDEBAR ENGINE + LOWER-THIRD ACTIONS
+  // =========================================================================
+  const PANEL_STORAGE_KEY = 'landacq_ui_panels_v1';
+  const DEFAULT_PANEL_LAYOUT = {
+    leftWidth: 330,
+    rightWidth: 340,
+    leftVisible: true,
+    rightVisible: true
+  };
+  let panelLayout = { ...DEFAULT_PANEL_LAYOUT };
+  try {
+    const savedLayout = JSON.parse(localStorage.getItem(PANEL_STORAGE_KEY) || 'null');
+    if (savedLayout && typeof savedLayout === 'object') {
+      panelLayout = { ...DEFAULT_PANEL_LAYOUT, ...savedLayout };
+    }
+  } catch (_e) {}
+
+  let mapInvalidateTimer = null;
+  function scheduleMapInvalidate(delayMs = 310) {
+    if (mapInvalidateTimer) clearTimeout(mapInvalidateTimer);
+    mapInvalidateTimer = setTimeout(() => {
+      map.invalidateSize({ animate: false });
+    }, delayMs);
+  }
+
+  function clampPanelWidth(w) {
+    const maxW = Math.max(280, Math.min(580, Math.floor(window.innerWidth * 0.44)));
+    return Math.max(240, Math.min(maxW, Math.round(Number(w) || 330)));
+  }
+
+  function savePanelLayout() {
+    try {
+      localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(panelLayout));
+    } catch (_e) {}
+  }
+
+  function applyPanelLayout(persist = false) {
+    panelLayout.leftWidth = clampPanelWidth(panelLayout.leftWidth);
+    panelLayout.rightWidth = clampPanelWidth(panelLayout.rightWidth);
+
+    el.sidebarLeft.style.width = `${panelLayout.leftWidth}px`;
+    el.sidebarRight.style.width = `${panelLayout.rightWidth}px`;
+
+    const isMobile = window.innerWidth <= 980;
+    if (!isMobile) {
+      el.sidebarLeft.classList.toggle('panel-hidden', !panelLayout.leftVisible);
+      el.sidebarRight.classList.toggle('panel-hidden', !panelLayout.rightVisible);
+      if (el.resizerLeft) el.resizerLeft.classList.toggle('hidden-resizer', !panelLayout.leftVisible);
+      if (el.resizerRight) el.resizerRight.classList.toggle('hidden-resizer', !panelLayout.rightVisible);
+      el.btnToggleLeft.classList.toggle('is-open', panelLayout.leftVisible);
+      el.btnToggleRight.classList.toggle('is-open', panelLayout.rightVisible);
+      if (el.dockShowLeft) el.dockShowLeft.classList.toggle('visible', !panelLayout.leftVisible);
+      if (el.dockShowRight) el.dockShowRight.classList.toggle('visible', !panelLayout.rightVisible);
+    } else {
+      el.sidebarLeft.classList.remove('panel-hidden');
+      el.sidebarRight.classList.remove('panel-hidden');
+      if (el.dockShowLeft) el.dockShowLeft.classList.remove('visible');
+      if (el.dockShowRight) el.dockShowRight.classList.remove('visible');
+    }
+
+    if (persist) savePanelLayout();
+    scheduleMapInvalidate(310);
+  }
+
+  function toggleSidebarPanel(side, forceState = null) {
+    if (window.innerWidth <= 980) {
+      if (side === 'left') {
+        const nextOpen = forceState !== null ? Boolean(forceState) : !el.sidebarLeft.classList.contains('drawer-open');
+        el.sidebarLeft.classList.toggle('drawer-open', nextOpen);
+        if (nextOpen) el.sidebarRight.classList.remove('drawer-open');
+      } else {
+        const nextOpen = forceState !== null ? Boolean(forceState) : !el.sidebarRight.classList.contains('drawer-open');
+        el.sidebarRight.classList.toggle('drawer-open', nextOpen);
+        if (nextOpen) el.sidebarLeft.classList.remove('drawer-open');
+      }
+      return;
+    }
+
+    if (side === 'left') {
+      panelLayout.leftVisible = forceState !== null ? Boolean(forceState) : !panelLayout.leftVisible;
+    } else {
+      panelLayout.rightVisible = forceState !== null ? Boolean(forceState) : !panelLayout.rightVisible;
+    }
+    applyPanelLayout(true);
+  }
+
+  function bindPanelResizer(resizerEl, side) {
+    if (!resizerEl) return;
+    let rafId = null;
+
+    resizerEl.addEventListener('pointerdown', e => {
+      if (window.innerWidth <= 980) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = side === 'left' ? panelLayout.leftWidth : panelLayout.rightWidth;
+      document.body.classList.add('is-resizing-panel');
+      resizerEl.classList.add('resizing');
+
+      const onMove = ev => {
+        const delta = ev.clientX - startX;
+        const nextWidth = side === 'left' ? startWidth + delta : startWidth - delta;
+        if (side === 'left') {
+          panelLayout.leftWidth = clampPanelWidth(nextWidth);
+          el.sidebarLeft.style.width = `${panelLayout.leftWidth}px`;
+        } else {
+          panelLayout.rightWidth = clampPanelWidth(nextWidth);
+          el.sidebarRight.style.width = `${panelLayout.rightWidth}px`;
+        }
+        if (!rafId) {
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            map.invalidateSize({ animate: false });
+          });
+        }
+      };
+
+      const onUp = () => {
+        document.body.classList.remove('is-resizing-panel');
+        resizerEl.classList.remove('resizing');
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        savePanelLayout();
+        map.invalidateSize({ animate: false });
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+
+    resizerEl.addEventListener('dblclick', () => {
+      if (window.innerWidth <= 980) return;
+      if (side === 'left') panelLayout.leftWidth = DEFAULT_PANEL_LAYOUT.leftWidth;
+      else panelLayout.rightWidth = DEFAULT_PANEL_LAYOUT.rightWidth;
+      applyPanelLayout(true);
+    });
+  }
+
+  bindPanelResizer(el.resizerLeft, 'left');
+  bindPanelResizer(el.resizerRight, 'right');
+
+  el.btnToggleLeft.addEventListener('click', () => toggleSidebarPanel('left'));
+  el.btnToggleRight.addEventListener('click', () => toggleSidebarPanel('right'));
+  if (el.btnHideLeft) el.btnHideLeft.addEventListener('click', () => toggleSidebarPanel('left', false));
+  el.btnCloseInspectorMobile.addEventListener('click', () => toggleSidebarPanel('right', false));
+  if (el.dockShowLeft) el.dockShowLeft.addEventListener('click', () => toggleSidebarPanel('left', true));
+  if (el.dockShowRight) el.dockShowRight.addEventListener('click', () => toggleSidebarPanel('right', true));
+
+  [el.sidebarLeft, el.sidebarRight].forEach(sb => {
+    if (!sb) return;
+    sb.addEventListener('transitionend', e => {
+      if (e.propertyName === 'width' || e.propertyName === 'transform') {
+        map.invalidateSize({ animate: false });
+      }
+    });
   });
-  el.btnToggleRight.addEventListener('click', () => {
-    el.sidebarRight.classList.toggle('drawer-open');
-    el.sidebarLeft.classList.remove('drawer-open');
-  });
-  el.btnCloseInspectorMobile.addEventListener('click', () => {
-    el.sidebarRight.classList.remove('drawer-open');
-  });
+  window.addEventListener('resize', () => applyPanelLayout(false));
+
+  if (el.ltBtnZoom) {
+    el.ltBtnZoom.addEventListener('click', () => {
+      if (state.selectedId) zoomToParcel(state.selectedId);
+    });
+  }
+  if (el.ltBtnInspect) {
+    el.ltBtnInspect.addEventListener('click', () => {
+      toggleSidebarPanel('right', true);
+    });
+  }
+  if (el.ltBtnClose) {
+    el.ltBtnClose.addEventListener('click', hideParcelLowerThird);
+  }
 
   el.searchInput.addEventListener('input', () => {
     state.filters.search = el.searchInput.value;
@@ -1185,28 +1420,39 @@
   });
 
   el.btnRefreshDb.addEventListener('click', async () => {
-    const dbOk = await LStore.initDb();
-    state.projectCfg = LStore.loadProjectConfig();
-    state.parcels = LStore.loadParcels();
-    state.rowFeatures = LStore.loadRowFeatures();
-    state.logs = LStore.loadLogs();
-    el.projectSubtitle.textContent = `Sistem Informasi Geografis Pembebasan Lahan — ${state.projectCfg.name}`;
-    renderRowLayer();
-    refreshFilterControlsMetadata();
-    renderActivityLogs();
-    syncAll();
-    fitAllVisibleParcels(true);
-    if (dbOk) {
-      showToast(`Data disinkronkan dari Supabase (${state.parcels.length} persil).`, 'success');
-    } else {
-      const dbStatus = LStore.getDbStatus();
-      showToast(`Gagal sinkronisasi Supabase: ${dbStatus.error || 'Koneksi terputus'}`, 'error');
+    el.btnRefreshDb.classList.add('is-spinning');
+    try {
+      const dbOk = await LStore.initDb();
+      state.projectCfg = LStore.loadProjectConfig();
+      state.parcels = LStore.loadParcels();
+      state.rowFeatures = LStore.loadRowFeatures();
+      state.logs = LStore.loadLogs();
+      el.projectSubtitle.textContent = `Sistem Informasi Geografis Pembebasan Lahan — ${state.projectCfg.name}`;
+      renderRowLayer();
+      refreshFilterControlsMetadata();
+      renderActivityLogs();
+      syncAll();
+      if (state.parcels.length > 0) {
+        fitAllVisibleParcels(true);
+      } else if (state.rowFeatures.length > 0) {
+        fitRowLayer();
+      } else {
+        map.flyTo([state.projectCfg.centerLat || LStore.DEFAULT_CENTER_LAT, state.projectCfg.centerLng || LStore.DEFAULT_CENTER_LNG], 12, { duration: 0.75 });
+      }
+      if (dbOk) {
+        showToast(`Data disinkronkan dari Supabase (${state.parcels.length} persil).`, 'success');
+      } else {
+        const dbStatus = LStore.getDbStatus();
+        showToast(`Gagal sinkronisasi Supabase: ${dbStatus.error || 'Koneksi terputus'}`, 'error');
+      }
+    } finally {
+      el.btnRefreshDb.classList.remove('is-spinning');
     }
   });
 
   el.btnOpenImport.addEventListener('click', () => {
     if (!RBAC_ROLES[state.role].canImport) {
-      showToast('Akses ditolak: Import hanya untuk Admin / Koordinator.', 'warn');
+      showToast('Akses ditolak: Import hanya untuk Master, Admin, atau Staf Ahli.', 'warn');
       return;
     }
     el.importFeedback.style.display = 'none';
@@ -1273,6 +1519,7 @@
     if (e.key === 'Escape') {
       el.importModal.classList.remove('open');
       el.exportModal.classList.remove('open');
+      hideParcelLowerThird();
     }
   });
 
@@ -1280,6 +1527,7 @@
   // INITIALIZE MAP PAGE
   // =========================================================================
   async function init() {
+    applyPanelLayout(false);
     const dbOk = await LStore.initDb();
     if (dbOk && !LStore.verifySessionWithDb(state.session, 'peta.html')) {
       return;
@@ -1318,7 +1566,7 @@
     } else if (state.rowFeatures.length > 0) {
       fitRowLayer();
     } else {
-      map.setView([state.projectCfg.centerLat || -6.5458, state.projectCfg.centerLng || 107.7232], 14);
+      map.setView([state.projectCfg.centerLat || LStore.DEFAULT_CENTER_LAT, state.projectCfg.centerLng || LStore.DEFAULT_CENTER_LNG], 12);
     }
 
     if (!dbOk) {

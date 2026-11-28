@@ -87,8 +87,8 @@ CREATE TABLE IF NOT EXISTS project_settings (
   wilayah VARCHAR(150),
   lebar_row_m INT NOT NULL DEFAULT 90,
   target_selesai DATE NULL,
-  center_lat DOUBLE PRECISION DEFAULT -6.5458,
-  center_lng DOUBLE PRECISION DEFAULT 107.7232,
+  center_lat DOUBLE PRECISION DEFAULT -0.44019,
+  center_lng DOUBLE PRECISION DEFAULT 116.98139,
   row_geojson TEXT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -122,9 +122,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_single_staf_ahli_role
   ON public.users (role) WHERE role IN ('staf_ahli', 'surveyor');
 
 -- Konfigurasi Proyek Awal & Akun Dummy (1 Master, 1 Admin, 1 Staf Ahli, 1 User)
-INSERT INTO project_settings (id, nama_proyek, kode_proyek, wilayah, lebar_row_m)
-VALUES (1, 'Proyek Pengadaan Lahan', 'PRJ-001', 'Belum ditentukan', 90)
+INSERT INTO project_settings (id, nama_proyek, kode_proyek, wilayah, lebar_row_m, center_lat, center_lng)
+VALUES (1, 'Proyek Pengadaan Lahan', 'PRJ-001', 'Kab. Kutai Kartanegara, Kalimantan Timur', 90, -0.44019, 116.98139)
 ON CONFLICT (id) DO NOTHING;
+
+UPDATE public.project_settings
+SET wilayah = 'Kab. Kutai Kartanegara, Kalimantan Timur',
+    center_lat = -0.44019,
+    center_lng = 116.98139
+WHERE id = 1
+  AND (wilayah IS NULL OR wilayah = 'Belum ditentukan' OR ABS(center_lat - (-6.5458)) < 0.002);
 
 INSERT INTO admins (id, nama_lengkap, username, email, password_hash, role, jabatan, is_active)
 VALUES
