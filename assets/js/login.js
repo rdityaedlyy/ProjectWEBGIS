@@ -41,7 +41,6 @@
     regName: document.getElementById('regName'),
     regUsername: document.getElementById('regUsername'),
     regUnit: document.getElementById('regUnit'),
-    regRole: document.getElementById('regRole'),
     regPassword: document.getElementById('regPassword'),
     regConfirmPassword: document.getElementById('regConfirmPassword'),
     btnToggleRegPwd: document.getElementById('btnToggleRegPwd')
@@ -74,8 +73,8 @@
       ? '<i data-lucide="user-plus" width="18" height="18" style="color: var(--st-bebas);"></i> Daftar Akun Baru'
       : '<i data-lucide="lock-keyhole" width="18" height="18" style="color: var(--accent-cyan);"></i> Masuk ke Sistem WebGIS';
     el.authCardSub.textContent = isRegister
-      ? 'Registrasi akun akan disimpan langsung ke tabel admins atau users.'
-      : 'Masuk dengan akun Anda atau daftar akun baru untuk mengakses peta.';
+      ? 'Registrasi akun baru otomatis terdaftar sebagai User / Pengguna di tabel users.'
+      : 'Masuk dengan akun Anda atau daftar akun User baru untuk melihat peta.';
 
     if (typeof lucide !== 'undefined') {
       lucide.createIcons();
@@ -143,9 +142,8 @@
     }
 
     if (admins.length === 0 && users.length === 0) {
-      el.regRole.value = 'master';
       switchAuthMode('register', true);
-      showAlert('Database akun masih kosong. Daftarkan akun Master pertama untuk memulai.', 'info');
+      showAlert('Database akun masih kosong. Daftar sebagai User baru atau jalankan dummy SQL di database/schema.sql.', 'info');
     } else if (pendingRedirect && !session) {
       showAlert(`Silakan masuk terlebih dahulu untuk mengakses halaman ${pendingRedirect === 'admin.html' ? 'Kelola' : 'Peta WebGIS'}.`, 'info');
     }
@@ -231,7 +229,6 @@
     const nama_lengkap = String(el.regName.value || '').trim();
     const username = String(el.regUsername.value || '').trim();
     const unit = String(el.regUnit.value || '').trim();
-    const role = LStore.normalizeAnyRole(el.regRole.value);
     const password = String(el.regPassword.value || '');
     const confirm = String(el.regConfirmPassword.value || '');
 
@@ -267,39 +264,20 @@
         return;
       }
 
-      let createdAccount;
-      let targetTable;
-      if (role === 'master' || role === 'admin') {
-        createdAccount = await LStore.createAdminRecord({
-          nama_lengkap,
-          username,
-          email: username,
-          password,
-          role,
-          jabatan: unit || (role === 'master' ? 'Master Sistem' : 'Koordinator Pengadaan Tanah'),
-          is_active: true
-        });
-        targetTable = 'admins';
-        try {
-          await LStore.pushLog(nama_lengkap, 'admins', 'Register', `Registrasi akun ${role} baru ke tabel admins (${createdAccount.id}).`);
-        } catch (_err) {}
-      } else {
-        createdAccount = await LStore.createUserRecord({
-          nama_lengkap,
-          username,
-          email: username,
-          password,
-          role,
-          unit_kerja: unit || (role === 'staf_ahli' ? 'Tim Staf Ahli' : 'Pengguna Umum'),
-          is_active: true
-        });
-        targetTable = 'users';
-        try {
-          await LStore.pushLog(nama_lengkap, 'users', 'Register', `Registrasi akun ${role} baru ke tabel users (${createdAccount.id}).`);
-        } catch (_err) {}
-      }
+      const createdAccount = await LStore.createUserRecord({
+        nama_lengkap,
+        username,
+        email: username,
+        password,
+        role: 'user',
+        unit_kerja: unit || 'Pengguna Umum',
+        is_active: true
+      });
+      try {
+        await LStore.pushLog(nama_lengkap, 'users', 'Register', `Registrasi akun user baru ke tabel users (${createdAccount.id}).`);
+      } catch (_err) {}
 
-      await loginAndRedirect(createdAccount, targetTable);
+      await loginAndRedirect(createdAccount, 'users');
     } catch (err) {
       showAlert(err.message || 'Gagal menyimpan akun baru ke Supabase.', 'error');
     } finally {

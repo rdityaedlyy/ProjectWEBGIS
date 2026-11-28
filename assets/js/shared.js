@@ -533,6 +533,10 @@
     const admins = loadAdmins();
     const nowIso = new Date().toISOString();
     const safeRole = normalizeAdminRole(role, username);
+    if (admins.some(a => normalizeAdminRole(a.role, a.username || a.id) === safeRole)) {
+      const label = safeRole === 'master' ? 'Master' : 'Admin';
+      throw new Error(`Kuota penuh: Role ${label} hanya diperbolehkan 1 akun. Edit akun ${label} yang sudah ada.`);
+    }
     const prefix = safeRole === 'master' ? 'MST' : 'ADM';
     const model = {
       id: nextRecordId(admins, prefix),
@@ -581,6 +585,10 @@
     if (idx === -1) throw new Error('Data admin tidak ditemukan.');
     const merged = { ...admins[idx], ...fields, updated_at: new Date().toISOString() };
     merged.role = normalizeAdminRole(merged.role, merged.username || merged.id);
+    if (admins.some((a, i) => i !== idx && normalizeAdminRole(a.role, a.username || a.id) === merged.role)) {
+      const label = merged.role === 'master' ? 'Master' : 'Admin';
+      throw new Error(`Kuota penuh: Role ${label} hanya diperbolehkan 1 akun.`);
+    }
     const buildPayload = includeRole => {
       const row = adminModelToRow(merged, includeRole);
       delete row.id;
@@ -627,12 +635,16 @@
     const users = loadUsers();
     const nowIso = new Date().toISOString();
     const safeRole = normalizeUserRole(role);
+    if (safeRole === 'staf_ahli' && users.some(u => normalizeUserRole(u.role) === 'staf_ahli')) {
+      throw new Error('Kuota penuh: Role Staf Ahli hanya diperbolehkan 1 akun. Edit akun Staf Ahli yang sudah ada.');
+    }
+    const prefix = safeRole === 'staf_ahli' ? 'STF' : 'USR';
     const validCreator = created_by_admin_id && loadAdmins().some(a => a.id === created_by_admin_id)
       ? created_by_admin_id
       : null;
 
     const model = {
-      id: nextRecordId(users, 'USR'),
+      id: nextRecordId(users, prefix),
       nama_lengkap: String(nama_lengkap || '').trim(),
       username: String(username || '').trim(),
       email: String(email || username || '').trim(),
@@ -670,6 +682,9 @@
     if (idx === -1) throw new Error('Data user tidak ditemukan.');
     const merged = { ...users[idx], ...fields, updated_at: new Date().toISOString() };
     merged.role = normalizeUserRole(merged.role);
+    if (merged.role === 'staf_ahli' && users.some((u, i) => i !== idx && normalizeUserRole(u.role) === 'staf_ahli')) {
+      throw new Error('Kuota penuh: Role Staf Ahli hanya diperbolehkan 1 akun.');
+    }
     const row = userModelToRow(merged);
     delete row.id;
     delete row.created_at;

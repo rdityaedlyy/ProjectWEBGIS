@@ -105,21 +105,38 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indeks Pencarian
+-- Indeks Pencarian & Pembatas 1 Akun (1 Master, 1 Admin, 1 Staf Ahli)
 CREATE INDEX IF NOT EXISTS idx_parcels_status ON parcels (status_akuisisi);
 CREATE INDEX IF NOT EXISTS idx_parcels_desa ON parcels (desa_kelurahan);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
 
--- Konfigurasi Proyek Awal & Akun Awal (Master & Admin)
+-- Normalisasi role lama sebelum membuat indeks unik tunggal
+UPDATE public.users SET role = 'staf_ahli' WHERE role = 'surveyor';
+UPDATE public.users SET role = 'user' WHERE role = 'viewer';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_single_master_role
+  ON public.admins (role) WHERE role = 'master';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_single_admin_role
+  ON public.admins (role) WHERE role = 'admin';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_single_staf_ahli_role
+  ON public.users (role) WHERE role IN ('staf_ahli', 'surveyor');
+
+-- Konfigurasi Proyek Awal & Akun Dummy (1 Master, 1 Admin, 1 Staf Ahli, 1 User)
 INSERT INTO project_settings (id, nama_proyek, kode_proyek, wilayah, lebar_row_m)
 VALUES (1, 'Proyek Pengadaan Lahan', 'PRJ-001', 'Belum ditentukan', 90)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO admins (id, nama_lengkap, username, email, password_hash, role, jabatan, is_active)
 VALUES
-  ('MST-001', 'Master Sistem WebGIS', 'master', 'master@landacq.id', 'master123', 'master', 'Super Administrator & Master Sistem', TRUE),
-  ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'admin', 'Koordinator Pengadaan Tanah', TRUE)
-ON CONFLICT (id) DO NOTHING;
+  ('MST-001', 'Master Sistem WebGIS', 'master', 'master@landacq.id', 'master123', 'master', 'Master & Super Administrator', TRUE),
+  ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'admin', 'Admin Pengawas & Operasional', TRUE)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO users (id, nama_lengkap, username, email, password_hash, role, unit_kerja, is_active, created_by_admin_id)
+VALUES
+  ('STF-001', 'Staf Ahli Pertanahan', 'stafahli', 'stafahli@landacq.id', 'staf123', 'staf_ahli', 'Tim Teknis & Akuisisi Data', TRUE, 'MST-001'),
+  ('USR-001', 'User Publik WebGIS', 'user', 'user@landacq.id', 'user123', 'user', 'Pengguna Umum', TRUE, 'MST-001')
+ON CONFLICT DO NOTHING;
 
 -- Row Level Security (Mode Prototipe WebGIS Frontend-Only)
 -- Catatan: Untuk produksi, batasi policy ini dan gunakan Supabase Auth + Edge Functions / bcrypt.

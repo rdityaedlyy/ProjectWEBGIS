@@ -173,9 +173,10 @@
             Masuk
           </button>
 
-          <div class="mono" style="font-size: 11px; color: var(--text-secondary); background: rgba(15, 23, 42, 0.72); border: 1px solid var(--border-subtle); padding: 7px 10px; line-height: 1.55;">
-            Master: <strong style="color: #c084fc;">master</strong> / <strong style="color: #c084fc;">master123</strong> &bull;
-            Admin: <strong style="color: #67e8f9;">admin</strong> / <strong style="color: #67e8f9;">admin123</strong>
+          <div class="mono" style="font-size: 10.5px; color: var(--text-secondary); background: rgba(15, 23, 42, 0.72); border: 1px solid var(--border-subtle); padding: 8px 10px; line-height: 1.6;">
+            <div style="color: var(--text-primary); font-weight: 600; margin-bottom: 2px;">Akun Dummy (1 Master &bull; 1 Admin &bull; 1 Staf Ahli &bull; User):</div>
+            <div>Master: <strong style="color: #c084fc;">master</strong> / <strong style="color: #c084fc;">master123</strong> &bull; Admin: <strong style="color: #34d399;">admin</strong> / <strong style="color: #34d399;">admin123</strong></div>
+            <div>Staf Ahli: <strong style="color: #fbbf24;">stafahli</strong> / <strong style="color: #fbbf24;">staf123</strong> &bull; User: <strong style="color: #94a3b8;">user</strong> / <strong style="color: #94a3b8;">user123</strong></div>
           </div>
 
           <div class="auth-switch-note">
@@ -200,19 +201,9 @@
               <input id="regUsername" class="input" type="text" placeholder="nama@instansi.id" autocomplete="username" required />
             </div>
             <div class="form-group" style="margin-bottom: 0;">
-              <label class="field-label" for="regUnit">Unit / Divisi</label>
-              <input id="regUnit" class="input" type="text" placeholder="Tim Lapangan / P2T" />
+              <label class="field-label" for="regUnit">Unit / Instansi</label>
+              <input id="regUnit" class="input" type="text" placeholder="Opsional (Pengguna Umum)" />
             </div>
-          </div>
-
-          <div class="form-group" style="margin-bottom: 0;">
-            <label class="field-label" for="regRole">Role Akses</label>
-            <select id="regRole" class="select">
-              <option value="user" selected>User / Pengguna (Hanya Lihat Data)</option>
-              <option value="staf_ahli">Staf Ahli (Tambah / Edit / Hapus Data)</option>
-              <option value="admin">Admin (Pantau Log, Data &amp; Email User)</option>
-              <option value="master">Master (Akses Penuh 100%)</option>
-            </select>
           </div>
 
           <div class="form-row-2" style="margin-bottom: 0;">
@@ -229,6 +220,10 @@
               <label class="field-label" for="regConfirmPassword">Konfirmasi Sandi</label>
               <input id="regConfirmPassword" class="input" type="password" placeholder="Ulangi kata sandi" autocomplete="new-password" minlength="6" required />
             </div>
+          </div>
+
+          <div style="font-size: 11px; color: var(--text-secondary); background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); padding: 6px 10px;">
+            Pendaftaran akun baru otomatis terdaftar sebagai <strong style="color: var(--text-primary);">User / Pengguna</strong> (akses lihat peta &amp; data).
           </div>
 
           <button type="submit" class="btn btn-success" style="height: 38px; font-size: 13px; margin-top: 2px;">

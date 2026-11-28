@@ -405,6 +405,28 @@
       showToast('Akses ditolak: Hanya Master yang dapat mengelola akun.', 'error');
       return;
     }
+    const hasOtherMaster = state.admins.some(a =>
+      a.id !== adminId && LStore.normalizeAdminRole(a.role, a.username || a.id) === 'master'
+    );
+    const hasOtherAdmin = state.admins.some(a =>
+      a.id !== adminId && LStore.normalizeAdminRole(a.role, a.username || a.id) === 'admin'
+    );
+    if (!adminId && hasOtherMaster && hasOtherAdmin) {
+      showToast('Kuota penuh: maksimal 1 akun Master dan 1 akun Admin. Gunakan Edit pada akun yang sudah ada.', 'warn');
+      return;
+    }
+
+    const optMaster = el.amRole.querySelector('option[value="master"]');
+    const optAdmin = el.amRole.querySelector('option[value="admin"]');
+    if (optMaster) {
+      optMaster.disabled = hasOtherMaster;
+      optMaster.textContent = hasOtherMaster ? 'Master (Kuota 1/1 Terisi)' : 'Master (100% Akses)';
+    }
+    if (optAdmin) {
+      optAdmin.disabled = hasOtherAdmin;
+      optAdmin.textContent = hasOtherAdmin ? 'Admin (Kuota 1/1 Terisi)' : 'Admin';
+    }
+
     state.editingAdminId = adminId;
     if (adminId) {
       const a = state.admins.find(item => item.id === adminId);
@@ -422,8 +444,8 @@
       el.amName.value = '';
       el.amUsername.value = '';
       el.amEmail.value = '';
-      el.amRole.value = 'admin';
-      el.amJabatan.value = 'Koordinator Pengadaan Tanah';
+      el.amRole.value = hasOtherAdmin ? 'master' : 'admin';
+      el.amJabatan.value = el.amRole.value === 'master' ? 'Master & Super Administrator' : 'Admin Pengawas & Operasional';
       el.amPassword.value = '';
       el.amActive.checked = true;
     }
@@ -579,6 +601,17 @@
       showToast('Akses ditolak: Hanya Master yang dapat mengubah atau menambah akun user.', 'error');
       return;
     }
+    const hasOtherStafAhli = state.users.some(u =>
+      u.id !== userId && LStore.normalizeUserRole(u.role) === 'staf_ahli'
+    );
+    const optStaf = el.umRole.querySelector('option[value="staf_ahli"]');
+    if (optStaf) {
+      optStaf.disabled = hasOtherStafAhli;
+      optStaf.textContent = hasOtherStafAhli
+        ? 'Staf Ahli (Kuota 1/1 Terisi)'
+        : 'Staf Ahli (Kelola Data)';
+    }
+
     state.editingUserId = userId;
     if (userId) {
       const u = state.users.find(item => item.id === userId);
@@ -596,7 +629,7 @@
       el.umName.value = '';
       el.umUsername.value = '';
       el.umEmail.value = '';
-      el.umUnit.value = 'Tim Lapangan';
+      el.umUnit.value = 'Pengguna Umum';
       el.umRole.value = 'user';
       el.umPassword.value = '';
       el.umActive.checked = true;
