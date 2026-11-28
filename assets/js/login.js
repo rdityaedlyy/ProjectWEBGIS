@@ -121,9 +121,14 @@
     const session = LStore.loadSession();
     if (session) {
       el.sessionResumeBar.classList.add('show');
-      const roleLabel = (LStore.RBAC_ROLES[session.role] || {}).label || session.role;
+      const roleMeta = LStore.RBAC_ROLES[session.role] || {};
+      const roleLabel = roleMeta.label || session.role;
       el.resumeUserText.textContent = `${session.name} (${roleLabel})`;
-      el.btnResumeAdmin.style.display = session.originRole === 'admin' || session.role === 'admin' ? 'inline-flex' : 'none';
+      const canAdm = Boolean((LStore.RBAC_ROLES[session.originRole] || roleMeta).canAccessAdmin);
+      el.btnResumeAdmin.style.display = canAdm ? 'inline-flex' : 'none';
+      if (canAdm && session.role === 'staf_ahli') {
+        el.btnResumeAdmin.innerHTML = '<i data-lucide="settings-2" width="12" height="12"></i> Kelola Data';
+      }
     } else {
       el.sessionResumeBar.classList.remove('show');
     }
@@ -138,16 +143,18 @@
     }
 
     if (admins.length === 0 && users.length === 0) {
-      el.regRole.value = 'admin';
+      el.regRole.value = 'master';
       switchAuthMode('register', true);
-      showAlert('Database akun masih kosong (tanpa dummy). Daftarkan akun Admin pertama untuk memulai.', 'info');
+      showAlert('Database akun masih kosong. Daftarkan akun Master pertama untuk memulai.', 'info');
     } else if (pendingRedirect && !session) {
-      showAlert(`Silakan masuk terlebih dahulu untuk mengakses halaman ${pendingRedirect === 'admin.html' ? 'Kelola / Admin' : 'Peta WebGIS'}.`, 'info');
+      showAlert(`Silakan masuk terlebih dahulu untuk mengakses halaman ${pendingRedirect === 'admin.html' ? 'Kelola' : 'Peta WebGIS'}.`, 'info');
     }
   }
 
   async function loginAndRedirect(account, table) {
-    const role = table === 'admins' ? 'admin' : account.role;
+    const role = table === 'admins'
+      ? LStore.normalizeAdminRole(account.role, account.username || account.id)
+      : LStore.normalizeUserRole(account.role);
     LStore.saveSession({
       accountId: account.id,
       table,
@@ -161,16 +168,20 @@
     });
 
     try {
-      await LStore.pushLog(account.nama_lengkap, table, 'Login', `Masuk ke sistem sebagai ${LStore.RBAC_ROLES[role].label}.`);
+      await LStore.pushLog(
+        account.nama_lengkap,
+        table,
+        'Login',
+        `Login berhasil: ${account.nama_lengkap} (${account.username} / ${account.email}) — Role ${LStore.RBAC_ROLES[role].label}.`
+      );
     } catch (err) {
       console.warn('Gagal mencatat log login:', err);
     }
 
-    let target = pendingRedirect || (role === 'admin' ? 'admin.html' : 'peta.html');
-    if (target === 'admin.html' && role !== 'admin') {
+    let target = pendingRedirect || 'peta.html';
+    if (target === 'admin.html' && !LStore.RBAC_ROLES[role].canAccessAdmin) {
       target = 'peta.html';
     }
-    // If logging in normally without redirect, open map page by default
     if (!pendingRedirect) {
       target = 'peta.html';
     }
@@ -220,7 +231,7 @@
     const nama_lengkap = String(el.regName.value || '').trim();
     const username = String(el.regUsername.value || '').trim();
     const unit = String(el.regUnit.value || '').trim();
-    const role = LStore.RBAC_ROLES[el.regRole.value] ? el.regRole.value : 'surveyor';
+    const role = LStore.normalizeAnyRole(el.regRole.value);
     const password = String(el.regPassword.value || '');
     const confirm = String(el.regConfirmPassword.value || '');
 
@@ -258,18 +269,19 @@
 
       let createdAccount;
       let targetTable;
-      if (role === 'admin') {
+      if (role === 'master' || role === 'admin') {
         createdAccount = await LStore.createAdminRecord({
           nama_lengkap,
           username,
           email: username,
           password,
-          jabatan: unit || 'Koordinator Pengadaan Tanah',
+          role,
+          jabatan: unit || (role === 'master' ? 'Master Sistem' : 'Koordinator Pengadaan Tanah'),
           is_active: true
         });
         targetTable = 'admins';
         try {
-          await LStore.pushLog(nama_lengkap, 'admins', 'Register', `Registrasi akun baru ke tabel admins (${createdAccount.id}).`);
+          await LStore.pushLog(nama_lengkap, 'admins', 'Register', `Registrasi akun ${role} baru ke tabel admins (${createdAccount.id}).`);
         } catch (_err) {}
       } else {
         createdAccount = await LStore.createUserRecord({
@@ -278,12 +290,12 @@
           email: username,
           password,
           role,
-          unit_kerja: unit || 'Tim Lapangan',
+          unit_kerja: unit || (role === 'staf_ahli' ? 'Tim Staf Ahli' : 'Pengguna Umum'),
           is_active: true
         });
         targetTable = 'users';
         try {
-          await LStore.pushLog(nama_lengkap, 'users', 'Register', `Registrasi akun baru ke tabel users (${createdAccount.id} • ${role}).`);
+          await LStore.pushLog(nama_lengkap, 'users', 'Register', `Registrasi akun ${role} baru ke tabel users (${createdAccount.id}).`);
         } catch (_err) {}
       }
 

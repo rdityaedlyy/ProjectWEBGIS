@@ -4,27 +4,28 @@
 -- Jalankan seluruh script ini pada menu SQL Editor di dashboard Supabase.
 -- ============================================================================
 
--- 1. Tabel Administrator (Tabel terpisah khusus pengelola / koordinator sistem)
+-- 1. Tabel Master & Administrator
 CREATE TABLE IF NOT EXISTS admins (
   id VARCHAR(20) PRIMARY KEY,
   nama_lengkap VARCHAR(120) NOT NULL,
   username VARCHAR(80) NOT NULL UNIQUE,
   email VARCHAR(120) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'admin' CHECK (role IN ('master', 'admin')),
   jabatan VARCHAR(100) DEFAULT 'Koordinator Pengadaan Tanah',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 2. Tabel Pengguna / User Operasional (Surveyor Lapangan & Viewer Eksekutif)
+-- 2. Tabel Pengguna / User Operasional (Staf Ahli & User)
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(20) PRIMARY KEY,
   nama_lengkap VARCHAR(120) NOT NULL,
   username VARCHAR(80) NOT NULL UNIQUE,
   email VARCHAR(120) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(20) NOT NULL CHECK (role IN ('surveyor', 'viewer')),
+  role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('staf_ahli', 'user', 'surveyor', 'viewer')),
   unit_kerja VARCHAR(100) DEFAULT 'Tim Lapangan',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_by_admin_id VARCHAR(20) NULL,
@@ -33,6 +34,27 @@ CREATE TABLE IF NOT EXISTS users (
   CONSTRAINT fk_users_admin FOREIGN KEY (created_by_admin_id)
     REFERENCES admins(id) ON DELETE SET NULL
 );
+
+-- Migrasi aman untuk database Supabase yang sudah dibuat sebelumnya
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'admins' AND column_name = 'role'
+  ) THEN
+    ALTER TABLE public.admins ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'admin';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'admins_role_check'
+  ) THEN
+    ALTER TABLE public.admins ADD CONSTRAINT admins_role_check CHECK (role IN ('master', 'admin'));
+  END IF;
+
+  ALTER TABLE public.users DROP CONSTRAINT IF EXISTS users_role_check;
+  ALTER TABLE public.users ALTER COLUMN role SET DEFAULT 'user';
+  ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('staf_ahli', 'user', 'surveyor', 'viewer'));
+END $$;
 
 -- 3. Tabel Bidang Tanah / Persil Akuisisi Lahan
 CREATE TABLE IF NOT EXISTS parcels (
@@ -88,13 +110,15 @@ CREATE INDEX IF NOT EXISTS idx_parcels_status ON parcels (status_akuisisi);
 CREATE INDEX IF NOT EXISTS idx_parcels_desa ON parcels (desa_kelurahan);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
 
--- Konfigurasi Proyek Awal & Akun Admin Dummy Sementara
+-- Konfigurasi Proyek Awal & Akun Awal (Master & Admin)
 INSERT INTO project_settings (id, nama_proyek, kode_proyek, wilayah, lebar_row_m)
 VALUES (1, 'Proyek Pengadaan Lahan', 'PRJ-001', 'Belum ditentukan', 90)
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO admins (id, nama_lengkap, username, email, password_hash, jabatan, is_active)
-VALUES ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'Koordinator Pengadaan Tanah', TRUE)
+INSERT INTO admins (id, nama_lengkap, username, email, password_hash, role, jabatan, is_active)
+VALUES
+  ('MST-001', 'Master Sistem WebGIS', 'master', 'master@landacq.id', 'master123', 'master', 'Super Administrator & Master Sistem', TRUE),
+  ('ADM-001', 'Administrator Sistem', 'admin', 'admin@landacq.id', 'admin123', 'admin', 'Koordinator Pengadaan Tanah', TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- Row Level Security (Mode Prototipe WebGIS Frontend-Only)

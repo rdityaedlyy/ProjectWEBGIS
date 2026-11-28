@@ -60,42 +60,117 @@
   ];
 
   const RBAC_ROLES = {
-    admin: {
-      label: 'Admin / Koordinator',
-      color: '#10b981',
-      bannerClass: 'role-admin',
-      icon: 'shield-check',
-      desc: 'Akses penuh: kelola tabel admin, tabel user, data persil, nilai UGR, dan import/export dataset.',
+    master: {
+      label: 'Master',
+      color: '#a855f7',
+      bannerClass: 'role-master',
+      icon: 'crown',
+      desc: 'Akses 100% seluruh website: kelola semua akun, lihat email & password pengguna, data persil, log audit, proyek, dan backup DB.',
       canEditCore: true,
       canEditField: true,
       canImport: true,
+      canExport: true,
       canReset: true,
-      canAccessAdmin: true
+      canAccessAdmin: true,
+      canManageAccounts: true,
+      canViewUserEmails: true,
+      canViewPasswords: true,
+      canViewLogs: true,
+      canManageLogs: true,
+      canManageProject: true,
+      canBackupRestore: true,
+      canSwitchRolePreview: true
     },
-    surveyor: {
-      label: 'Surveyor / Lapangan',
-      color: '#f59e0b',
-      bannerClass: 'role-surveyor',
-      icon: 'hard-hat',
-      desc: 'Terbatas lapangan: hanya ubah status akuisisi, progres, dan catatan lapangan.',
-      canEditCore: false,
+    admin: {
+      label: 'Admin',
+      color: '#10b981',
+      bannerClass: 'role-admin',
+      icon: 'shield-check',
+      desc: 'Pantau log user login & perubahan data, tambah/edit/hapus data persil, konfigurasi proyek, dan lihat email user (tanpa password).',
+      canEditCore: true,
       canEditField: true,
-      canImport: false,
+      canImport: true,
+      canExport: true,
       canReset: false,
-      canAccessAdmin: false
+      canAccessAdmin: true,
+      canManageAccounts: false,
+      canViewUserEmails: true,
+      canViewPasswords: false,
+      canViewLogs: true,
+      canManageLogs: false,
+      canManageProject: true,
+      canBackupRestore: false,
+      canSwitchRolePreview: false
     },
-    viewer: {
-      label: 'Viewer / Eksekutif',
+    staf_ahli: {
+      label: 'Staf Ahli',
+      color: '#f59e0b',
+      bannerClass: 'role-staf',
+      icon: 'briefcase',
+      desc: 'Kelola data operasional: menambahkan, mengedit, dan menghapus data bidang persil serta import/export dataset.',
+      canEditCore: true,
+      canEditField: true,
+      canImport: true,
+      canExport: true,
+      canReset: false,
+      canAccessAdmin: true,
+      canManageAccounts: false,
+      canViewUserEmails: false,
+      canViewPasswords: false,
+      canViewLogs: false,
+      canManageLogs: false,
+      canManageProject: false,
+      canBackupRestore: false,
+      canSwitchRolePreview: false
+    },
+    user: {
+      label: 'User / Pengguna',
       color: '#64748b',
-      bannerClass: 'role-viewer',
+      bannerClass: 'role-user',
       icon: 'eye',
-      desc: 'Mode read-only: melihat peta, dashboard, filter, dan export laporan.',
+      desc: 'Mode lihat data (Read-Only): memantau peta, dashboard ringkasan, filter wilayah, tabel atribut, dan detail bidang persil.',
       canEditCore: false,
       canEditField: false,
       canImport: false,
+      canExport: true,
       canReset: false,
-      canAccessAdmin: false
+      canAccessAdmin: false,
+      canManageAccounts: false,
+      canViewUserEmails: false,
+      canViewPasswords: false,
+      canViewLogs: false,
+      canManageLogs: false,
+      canManageProject: false,
+      canBackupRestore: false,
+      canSwitchRolePreview: false
     }
+  };
+
+  function normalizeAdminRole(rawRole, usernameOrId = '') {
+    const val = String(rawRole || '').trim().toLowerCase();
+    if (val === 'master') return 'master';
+    if (val === 'admin') return 'admin';
+    const hint = String(usernameOrId || '').trim().toLowerCase();
+    if (hint === 'master' || hint.startsWith('mst-')) return 'master';
+    return 'admin';
+  }
+
+  function normalizeUserRole(rawRole) {
+    const val = String(rawRole || '').trim().toLowerCase();
+    if (val === 'staf_ahli' || val === 'staf ahli' || val === 'surveyor') return 'staf_ahli';
+    return 'user';
+  }
+
+  function normalizeAnyRole(rawRole) {
+    const val = String(rawRole || '').trim().toLowerCase();
+    if (val === 'master') return 'master';
+    if (val === 'admin') return 'admin';
+    if (val === 'staf_ahli' || val === 'staf ahli' || val === 'surveyor') return 'staf_ahli';
+    return 'user';
+  }
+
+  const schemaCapabilities = {
+    adminsHasRole: true
   };
 
   // =========================================================================
@@ -203,7 +278,7 @@
       username: row.username,
       email: row.email,
       password: row.password_hash,
-      role: 'admin',
+      role: normalizeAdminRole(row.role, row.username || row.id),
       jabatan: row.jabatan || 'Koordinator Pengadaan Tanah',
       is_active: row.is_active !== false,
       created_at: row.created_at,
@@ -211,8 +286,8 @@
     };
   }
 
-  function adminModelToRow(obj) {
-    return {
+  function adminModelToRow(obj, includeRole = true) {
+    const row = {
       id: obj.id,
       nama_lengkap: obj.nama_lengkap,
       username: obj.username,
@@ -223,6 +298,10 @@
       created_at: obj.created_at || new Date().toISOString(),
       updated_at: obj.updated_at || new Date().toISOString()
     };
+    if (includeRole) {
+      row.role = normalizeAdminRole(obj.role, obj.username || obj.id);
+    }
+    return row;
   }
 
   function userRowToModel(row) {
@@ -232,7 +311,7 @@
       username: row.username,
       email: row.email,
       password: row.password_hash,
-      role: row.role === 'viewer' ? 'viewer' : 'surveyor',
+      role: normalizeUserRole(row.role),
       unit_kerja: row.unit_kerja || 'Tim Lapangan',
       is_active: row.is_active !== false,
       created_by_admin_id: row.created_by_admin_id || null,
@@ -248,7 +327,7 @@
       username: obj.username,
       email: obj.email,
       password_hash: obj.password,
-      role: obj.role === 'viewer' ? 'viewer' : 'surveyor',
+      role: normalizeUserRole(obj.role),
       unit_kerja: obj.unit_kerja || 'Tim Lapangan',
       is_active: obj.is_active !== false,
       created_by_admin_id: obj.created_by_admin_id || null,
@@ -347,6 +426,9 @@
         sbFetch('audit_logs?select=*&order=id.desc&limit=100')
       ]);
 
+      if (Array.isArray(adminsRows) && adminsRows.length > 0) {
+        schemaCapabilities.adminsHasRole = Object.prototype.hasOwnProperty.call(adminsRows[0], 'role');
+      }
       memoryCache.admins = (adminsRows || []).map(adminRowToModel);
       memoryCache.users = (usersRows || []).map(userRowToModel);
       memoryCache.parcels = (parcelRows || []).map(parcelRowToFeature).filter(f => f.geometry);
@@ -447,26 +529,45 @@
     });
   }
 
-  async function createAdminRecord({ nama_lengkap, username, email, password, jabatan, is_active = true }) {
+  async function createAdminRecord({ nama_lengkap, username, email, password, role = 'admin', jabatan, is_active = true }) {
     const admins = loadAdmins();
     const nowIso = new Date().toISOString();
+    const safeRole = normalizeAdminRole(role, username);
+    const prefix = safeRole === 'master' ? 'MST' : 'ADM';
     const model = {
-      id: nextRecordId(admins, 'ADM'),
+      id: nextRecordId(admins, prefix),
       nama_lengkap: String(nama_lengkap || '').trim(),
       username: String(username || '').trim(),
       email: String(email || username || '').trim(),
       password: String(password || ''),
-      role: 'admin',
-      jabatan: String(jabatan || 'Koordinator Pengadaan Tanah').trim(),
+      role: safeRole,
+      jabatan: String(jabatan || (safeRole === 'master' ? 'Super Administrator & Master' : 'Koordinator Pengadaan Tanah')).trim(),
       is_active: is_active !== false,
       created_at: nowIso,
       updated_at: nowIso
     };
-    const inserted = await sbFetch('admins', {
-      method: 'POST',
-      prefer: 'return=representation',
-      body: adminModelToRow(model)
-    });
+    let inserted;
+    try {
+      inserted = await sbFetch('admins', {
+        method: 'POST',
+        prefer: 'return=representation',
+        body: adminModelToRow(model, schemaCapabilities.adminsHasRole)
+      });
+    } catch (err) {
+      if (/PGRST204|'role' column/i.test(err.message || '')) {
+        schemaCapabilities.adminsHasRole = false;
+        if (safeRole === 'master') {
+          throw new Error('Kolom "role" pada tabel admins Supabase belum ditambahkan. Jalankan script SQL migrasi dari database/schema.sql di SQL Editor Supabase.');
+        }
+        inserted = await sbFetch('admins', {
+          method: 'POST',
+          prefer: 'return=representation',
+          body: adminModelToRow(model, false)
+        });
+      } else {
+        throw err;
+      }
+    }
     const saved = inserted && inserted[0] ? adminRowToModel(inserted[0]) : model;
     admins.push(saved);
     memoryCache.admins = admins;
@@ -479,14 +580,35 @@
     const idx = admins.findIndex(a => a.id === id);
     if (idx === -1) throw new Error('Data admin tidak ditemukan.');
     const merged = { ...admins[idx], ...fields, updated_at: new Date().toISOString() };
-    const row = adminModelToRow(merged);
-    delete row.id;
-    delete row.created_at;
-    const updated = await sbFetch(`admins?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      prefer: 'return=representation',
-      body: row
-    });
+    merged.role = normalizeAdminRole(merged.role, merged.username || merged.id);
+    const buildPayload = includeRole => {
+      const row = adminModelToRow(merged, includeRole);
+      delete row.id;
+      delete row.created_at;
+      return row;
+    };
+    let updated;
+    try {
+      updated = await sbFetch(`admins?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        prefer: 'return=representation',
+        body: buildPayload(schemaCapabilities.adminsHasRole)
+      });
+    } catch (err) {
+      if (/PGRST204|'role' column/i.test(err.message || '')) {
+        schemaCapabilities.adminsHasRole = false;
+        if (merged.role === 'master') {
+          throw new Error('Kolom "role" pada tabel admins Supabase belum ditambahkan. Jalankan script SQL migrasi dari database/schema.sql di SQL Editor Supabase.');
+        }
+        updated = await sbFetch(`admins?id=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          prefer: 'return=representation',
+          body: buildPayload(false)
+        });
+      } else {
+        throw err;
+      }
+    }
     admins[idx] = updated && updated[0] ? adminRowToModel(updated[0]) : merged;
     memoryCache.admins = admins;
     writeStorageJson(STORAGE_KEYS.admins, admins);
@@ -501,10 +623,10 @@
     return admins;
   }
 
-  async function createUserRecord({ nama_lengkap, username, email, password, role, unit_kerja, is_active = true, created_by_admin_id = null }) {
+  async function createUserRecord({ nama_lengkap, username, email, password, role = 'user', unit_kerja, is_active = true, created_by_admin_id = null }) {
     const users = loadUsers();
     const nowIso = new Date().toISOString();
-    const safeRole = role === 'viewer' ? 'viewer' : 'surveyor';
+    const safeRole = normalizeUserRole(role);
     const validCreator = created_by_admin_id && loadAdmins().some(a => a.id === created_by_admin_id)
       ? created_by_admin_id
       : null;
@@ -516,17 +638,25 @@
       email: String(email || username || '').trim(),
       password: String(password || ''),
       role: safeRole,
-      unit_kerja: String(unit_kerja || 'Tim Lapangan').trim(),
+      unit_kerja: String(unit_kerja || (safeRole === 'staf_ahli' ? 'Tim Staf Ahli' : 'Pengguna Umum')).trim(),
       is_active: is_active !== false,
       created_by_admin_id: validCreator,
       created_at: nowIso,
       updated_at: nowIso
     };
-    const inserted = await sbFetch('users', {
-      method: 'POST',
-      prefer: 'return=representation',
-      body: userModelToRow(model)
-    });
+    let inserted;
+    try {
+      inserted = await sbFetch('users', {
+        method: 'POST',
+        prefer: 'return=representation',
+        body: userModelToRow(model)
+      });
+    } catch (err) {
+      if (/users_role_check|23514/i.test(err.message || '')) {
+        throw new Error(`Role '${safeRole}' belum diizinkan pada constraint users_role_check di Supabase. Jalankan blok migrasi database/schema.sql di SQL Editor Supabase.`);
+      }
+      throw err;
+    }
     const saved = inserted && inserted[0] ? userRowToModel(inserted[0]) : model;
     users.push(saved);
     memoryCache.users = users;
@@ -539,14 +669,23 @@
     const idx = users.findIndex(u => u.id === id);
     if (idx === -1) throw new Error('Data user tidak ditemukan.');
     const merged = { ...users[idx], ...fields, updated_at: new Date().toISOString() };
+    merged.role = normalizeUserRole(merged.role);
     const row = userModelToRow(merged);
     delete row.id;
     delete row.created_at;
-    const updated = await sbFetch(`users?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      prefer: 'return=representation',
-      body: row
-    });
+    let updated;
+    try {
+      updated = await sbFetch(`users?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        prefer: 'return=representation',
+        body: row
+      });
+    } catch (err) {
+      if (/users_role_check|23514/i.test(err.message || '')) {
+        throw new Error(`Role '${merged.role}' belum diizinkan pada constraint users_role_check di Supabase. Jalankan blok migrasi database/schema.sql di SQL Editor Supabase.`);
+      }
+      throw err;
+    }
     users[idx] = updated && updated[0] ? userRowToModel(updated[0]) : merged;
     memoryCache.users = users;
     writeStorageJson(STORAGE_KEYS.users, users);
@@ -742,7 +881,10 @@
       const raw = localStorage.getItem(STORAGE_KEYS.session);
       if (!raw) return null;
       const sess = JSON.parse(raw);
-      return sess && sess.role && RBAC_ROLES[sess.role] ? sess : null;
+      if (!sess || !sess.role) return null;
+      sess.role = normalizeAnyRole(sess.role);
+      sess.originRole = normalizeAnyRole(sess.originRole || sess.role);
+      return RBAC_ROLES[sess.role] ? sess : null;
     } catch (_e) {
       return null;
     }
@@ -1440,6 +1582,9 @@
     clearSession,
     requireAuth,
     verifySessionWithDb,
+    normalizeAdminRole,
+    normalizeUserRole,
+    normalizeAnyRole,
     computeGeometryAreaSqm,
     getGeometryCentroid,
     buildRectPolygonFromCenter,

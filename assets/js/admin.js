@@ -16,8 +16,8 @@
 
   const state = {
     session,
-    role: session.role || 'viewer',
-    originRole: session.originRole || session.role || 'viewer',
+    role: LStore.normalizeAnyRole(session.role || 'user'),
+    originRole: LStore.normalizeAnyRole(session.originRole || session.role || 'user'),
     admins: [],
     users: [],
     parcels: [],
@@ -29,18 +29,24 @@
     editingAdminId: null,
     editingUserId: null,
     editingParcelId: null,
+    showAdminPasswords: false,
+    showUserPasswords: false,
+    revealedPassIds: new Set(),
     filters: {
       adminSearch: '',
       userSearch: '',
       userRole: 'ALL',
       parcelSearch: '',
       parcelStatus: 'ALL',
-      parcelDesa: 'ALL'
+      parcelDesa: 'ALL',
+      logType: 'ALL',
+      logSearch: ''
     }
   };
 
   const el = {
     adminProjectSub: document.getElementById('adminProjectSub'),
+    navAdminLabel: document.getElementById('navAdminLabel'),
     headerUserName: document.getElementById('headerUserName'),
     roleSelect: document.getElementById('roleSelect'),
     roleDot: document.getElementById('roleDot'),
@@ -49,10 +55,20 @@
     guardRoleName: document.getElementById('guardRoleName'),
     adminWorkspace: document.getElementById('adminWorkspace'),
 
+    tabBtnAccounts: document.getElementById('tabBtnAccounts'),
+    tabAccountLabel: document.getElementById('tabAccountLabel'),
     tabAccountCount: document.getElementById('tabAccountCount'),
+    tabBtnParcels: document.getElementById('tabBtnParcels'),
     tabParcelCount: document.getElementById('tabParcelCount'),
+    tabBtnProject: document.getElementById('tabBtnProject'),
+    tabProjectLabel: document.getElementById('tabProjectLabel'),
+    tabBtnLogs: document.getElementById('tabBtnLogs'),
     tabLogCount: document.getElementById('tabLogCount'),
 
+    kpiCardAdmins: document.getElementById('kpiCardAdmins'),
+    kpiCardUsers: document.getElementById('kpiCardUsers'),
+    kpiCardParcels: document.getElementById('kpiCardParcels'),
+    kpiCardUgr: document.getElementById('kpiCardUgr'),
     admKpiAdmins: document.getElementById('admKpiAdmins'),
     admKpiAdminsActive: document.getElementById('admKpiAdminsActive'),
     admKpiUsers: document.getElementById('admKpiUsers'),
@@ -62,15 +78,22 @@
     admKpiUgr: document.getElementById('admKpiUgr'),
     admKpiBebasSub: document.getElementById('admKpiBebasSub'),
 
+    blockAdminsTable: document.getElementById('blockAdminsTable'),
     badgeAdminsCount: document.getElementById('badgeAdminsCount'),
     admSearchAdmin: document.getElementById('admSearchAdmin'),
+    btnToggleAllAdminPass: document.getElementById('btnToggleAllAdminPass'),
     btnAddAdmin: document.getElementById('btnAddAdmin'),
     admAdminTableBody: document.getElementById('admAdminTableBody'),
 
+    blockUsersTable: document.getElementById('blockUsersTable'),
+    usersAccessNote: document.getElementById('usersAccessNote'),
     badgeUsersCount: document.getElementById('badgeUsersCount'),
     admSearchUser: document.getElementById('admSearchUser'),
     admFilterUserRole: document.getElementById('admFilterUserRole'),
+    btnToggleAllUserPass: document.getElementById('btnToggleAllUserPass'),
     btnAddUser: document.getElementById('btnAddUser'),
+    thUserPass: document.getElementById('thUserPass'),
+    thUserActions: document.getElementById('thUserActions'),
     admUserTableBody: document.getElementById('admUserTableBody'),
 
     admSearchParcel: document.getElementById('admSearchParcel'),
@@ -85,6 +108,8 @@
     chkAllParcels: document.getElementById('chkAllParcels'),
     admParcelTableBody: document.getElementById('admParcelTableBody'),
 
+    projectGridContainer: document.getElementById('projectGridContainer'),
+    projectConfigCard: document.getElementById('projectConfigCard'),
     projectConfigForm: document.getElementById('projectConfigForm'),
     cfgName: document.getElementById('cfgName'),
     cfgCode: document.getElementById('cfgCode'),
@@ -104,11 +129,14 @@
     admBtnExportGeojson: document.getElementById('admBtnExportGeojson'),
     admBtnExportExcel: document.getElementById('admBtnExportExcel'),
     admBtnTemplateXlsx: document.getElementById('admBtnTemplateXlsx'),
+    admDbToolsBox: document.getElementById('admDbToolsBox'),
     admBtnBackupDb: document.getElementById('admBtnBackupDb'),
     admBtnRestoreDb: document.getElementById('admBtnRestoreDb'),
     admBtnClearData: document.getElementById('admBtnClearData'),
     admRestoreFileInput: document.getElementById('admRestoreFileInput'),
 
+    admLogSearch: document.getElementById('admLogSearch'),
+    admLogFilter: document.getElementById('admLogFilter'),
     btnClearLogs: document.getElementById('btnClearLogs'),
     admLogTableBody: document.getElementById('admLogTableBody'),
 
@@ -120,6 +148,7 @@
     amName: document.getElementById('amName'),
     amUsername: document.getElementById('amUsername'),
     amEmail: document.getElementById('amEmail'),
+    amRole: document.getElementById('amRole'),
     amJabatan: document.getElementById('amJabatan'),
     amPassword: document.getElementById('amPassword'),
     amActive: document.getElementById('amActive'),
@@ -184,22 +213,88 @@
   // =========================================================================
   // RBAC GUARD & HEADER SYNC
   // =========================================================================
+  function getAllowedTabsForRole(perm) {
+    const allowed = [];
+    if (perm.canManageAccounts || perm.canViewUserEmails) allowed.push('accounts');
+    if (perm.canEditCore) allowed.push('parcels');
+    if (perm.canManageProject || perm.canImport) allowed.push('project');
+    if (perm.canViewLogs) allowed.push('logs');
+    return allowed;
+  }
+
+  function setActiveAdminTab(tabName) {
+    const perm = RBAC_ROLES[state.role] || RBAC_ROLES.user;
+    const allowed = getAllowedTabsForRole(perm);
+    const nextTab = allowed.includes(tabName) ? tabName : (allowed[0] || 'parcels');
+    state.activeTab = nextTab;
+
+    document.querySelectorAll('.admin-tab-btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-tab') === nextTab);
+    });
+    document.getElementById('panelAccounts').classList.toggle('active', nextTab === 'accounts');
+    document.getElementById('panelParcels').classList.toggle('active', nextTab === 'parcels');
+    document.getElementById('panelProject').classList.toggle('active', nextTab === 'project');
+    document.getElementById('panelLogs').classList.toggle('active', nextTab === 'logs');
+  }
+
   function applyRbacGuard() {
-    const perm = RBAC_ROLES[state.role];
+    const perm = RBAC_ROLES[state.role] || RBAC_ROLES.user;
+    const originPerm = RBAC_ROLES[state.originRole] || perm;
     el.roleSelect.value = state.role;
-    el.roleSelect.disabled = state.originRole !== 'admin';
+    el.roleSelect.disabled = !originPerm.canSwitchRolePreview;
+    el.roleSelect.title = originPerm.canSwitchRolePreview
+      ? 'Mode Master: Simulasi Tampilan Role RBAC'
+      : `Role terkunci (${originPerm.label})`;
     el.roleDot.style.background = perm.color;
     el.headerUserName.textContent = state.session.name;
-    el.adminProjectSub.textContent = `Konsol Database Manual — ${state.project.name} (${state.project.code})`;
+    el.adminProjectSub.textContent = `${perm.label} — ${state.project.name} (${state.project.code})`;
+    if (el.navAdminLabel) {
+      el.navAdminLabel.textContent = state.role === 'staf_ahli' ? 'Kelola Data' : 'Kelola / Admin';
+    }
 
-    if (perm.canAccessAdmin) {
-      el.rbacGuard.classList.remove('show');
-      el.adminWorkspace.style.display = 'flex';
-    } else {
+    if (!perm.canAccessAdmin) {
       el.guardRoleName.textContent = perm.label;
       el.rbacGuard.classList.add('show');
       el.adminWorkspace.style.display = 'none';
+      return;
     }
+
+    el.rbacGuard.classList.remove('show');
+    el.adminWorkspace.style.display = 'flex';
+
+    const showAccounts = Boolean(perm.canManageAccounts || perm.canViewUserEmails);
+    const showParcels = Boolean(perm.canEditCore);
+    const showProject = Boolean(perm.canManageProject || perm.canImport);
+    const showLogs = Boolean(perm.canViewLogs);
+
+    el.tabBtnAccounts.style.display = showAccounts ? 'inline-flex' : 'none';
+    el.tabBtnParcels.style.display = showParcels ? 'inline-flex' : 'none';
+    el.tabBtnProject.style.display = showProject ? 'inline-flex' : 'none';
+    el.tabBtnLogs.style.display = showLogs ? 'inline-flex' : 'none';
+
+    el.tabAccountLabel.textContent = perm.canManageAccounts ? 'Manajemen Akun & Sandi' : 'Daftar Email User';
+    el.tabProjectLabel.textContent = perm.canManageProject ? 'Proyek, DB & Import/Export' : 'Import / Export Data';
+
+    el.kpiCardAdmins.style.display = perm.canManageAccounts ? 'block' : 'none';
+    el.kpiCardUsers.style.display = showAccounts ? 'block' : 'none';
+
+    el.blockAdminsTable.style.display = perm.canManageAccounts ? 'flex' : 'none';
+    el.btnToggleAllUserPass.style.display = perm.canViewPasswords ? 'inline-flex' : 'none';
+    el.btnAddUser.style.display = perm.canManageAccounts ? 'inline-flex' : 'none';
+    el.thUserActions.style.display = perm.canManageAccounts ? 'table-cell' : 'none';
+    el.usersAccessNote.textContent = perm.canViewPasswords
+      ? 'Akses Master: Menampilkan email, kata sandi, dan pengelolaan penuh seluruh pengguna.'
+      : 'Akses Admin: Anda dapat melihat email pengguna. Kata sandi & pengelolaan akun dikhususkan untuk Master.';
+
+    el.projectConfigCard.style.display = perm.canManageProject ? 'block' : 'none';
+    el.projectGridContainer.style.gridTemplateColumns = perm.canManageProject ? '' : '1fr';
+    el.admDbToolsBox.style.display = perm.canBackupRestore ? 'flex' : 'none';
+    el.btnClearLogs.style.display = perm.canManageLogs ? 'inline-flex' : 'none';
+
+    setActiveAdminTab(state.activeTab);
+    renderAdminTable();
+    renderUserTable();
+    renderLogsTable();
   }
 
   // =========================================================================
@@ -207,8 +302,10 @@
   // =========================================================================
   function renderSummaryKpis() {
     const activeAdmins = state.admins.filter(a => a.is_active !== false).length;
-    const surveyors = state.users.filter(u => u.role === 'surveyor').length;
-    const viewers = state.users.filter(u => u.role === 'viewer').length;
+    const mastersCount = state.admins.filter(a => LStore.normalizeAdminRole(a.role, a.username || a.id) === 'master').length;
+    const adminsCount = state.admins.length - mastersCount;
+    const stafAhliCount = state.users.filter(u => LStore.normalizeUserRole(u.role) === 'staf_ahli').length;
+    const usersCount = state.users.length - stafAhliCount;
 
     const totalLuas = state.parcels.reduce((s, f) => s + (Number(f.properties.luas_m2) || 0), 0);
     const totalUgr = state.parcels.reduce((s, f) => s + (Number(f.properties.nilai_ugr) || 0), 0);
@@ -218,10 +315,10 @@
     const bebasPct = totalLuas > 0 ? (bebasLuas / totalLuas) * 100 : 0;
 
     el.admKpiAdmins.textContent = formatNumberID(state.admins.length);
-    el.admKpiAdminsActive.textContent = `${activeAdmins} admin aktif`;
+    el.admKpiAdminsActive.textContent = `${mastersCount} master • ${adminsCount} admin (${activeAdmins} aktif)`;
 
     el.admKpiUsers.textContent = formatNumberID(state.users.length);
-    el.admKpiUsersBreakdown.textContent = `${surveyors} surveyor • ${viewers} viewer`;
+    el.admKpiUsersBreakdown.textContent = `${stafAhliCount} staf ahli • ${usersCount} user`;
 
     el.admKpiTotal.textContent = formatNumberID(state.parcels.length);
     el.admKpiLuasSub.textContent = `${formatNumberID(totalLuas)} m² (${formatNumberID(totalLuas / 10000, 2)} Ha)`;
@@ -229,25 +326,35 @@
     el.admKpiUgr.textContent = formatCompactIDR(totalUgr);
     el.admKpiBebasSub.textContent = `${formatNumberID(bebasPct, 1)}% terbebaskan`;
 
-    el.tabAccountCount.textContent = state.admins.length + state.users.length;
+    const perm = RBAC_ROLES[state.role] || RBAC_ROLES.user;
+    el.tabAccountCount.textContent = perm.canManageAccounts
+      ? (state.admins.length + state.users.length)
+      : state.users.length;
     el.tabParcelCount.textContent = state.parcels.length;
     el.tabLogCount.textContent = state.logs.length;
   }
 
   // =========================================================================
-  // TAB 1A: TABEL ADMINS
+  // TAB 1A: TABEL ADMINS (KHUSUS MASTER)
   // =========================================================================
   function renderAdminTable() {
+    const perm = RBAC_ROLES[state.role] || RBAC_ROLES.user;
+    if (!perm.canManageAccounts || !perm.canViewPasswords) {
+      el.admAdminTableBody.innerHTML = '';
+      el.badgeAdminsCount.textContent = 'TERKUNCI';
+      return;
+    }
+
     const q = state.filters.adminSearch.trim().toLowerCase();
     const list = state.admins.filter(a =>
-      !q || `${a.id} ${a.nama_lengkap} ${a.username} ${a.email} ${a.jabatan}`.toLowerCase().includes(q)
+      !q || `${a.id} ${a.nama_lengkap} ${a.username} ${a.email} ${a.jabatan} ${a.role}`.toLowerCase().includes(q)
     );
 
     el.badgeAdminsCount.textContent = `${list.length} BARIS`;
 
     if (!list.length) {
       el.admAdminTableBody.innerHTML = `
-        <tr><td colspan="8" style="text-align:center; padding: 18px; color: var(--text-muted);">Belum ada data pada tabel <span class="mono">admins</span>.</td></tr>
+        <tr><td colspan="10" style="text-align:center; padding: 18px; color: var(--text-muted);">Belum ada data pada tabel <span class="mono">admins</span>.</td></tr>
       `;
       return;
     }
@@ -255,12 +362,28 @@
     el.admAdminTableBody.innerHTML = list.map(a => {
       const isActive = a.is_active !== false;
       const isSelf = a.id === state.session.accountId;
+      const roleKey = LStore.normalizeAdminRole(a.role, a.username || a.id);
+      const roleMeta = RBAC_ROLES[roleKey] || RBAC_ROLES.admin;
+      const isRevealed = state.showAdminPasswords || state.revealedPassIds.has(a.id);
       return `
         <tr>
-          <td class="mono" style="color:#34d399; font-weight:700;">${escapeHtml(a.id)}</td>
+          <td class="mono" style="color:${roleMeta.color}; font-weight:700;">${escapeHtml(a.id)}</td>
           <td>${escapeHtml(a.nama_lengkap)} ${isSelf ? '<span class="brand-tag" style="margin-left:4px;">Anda</span>' : ''}</td>
           <td class="mono">${escapeHtml(a.username)}</td>
           <td class="mono" style="color:var(--text-secondary);">${escapeHtml(a.email)}</td>
+          <td>
+            <span class="status-badge" style="border-color:${roleMeta.color}; color:${roleMeta.color}; background: rgba(15,23,42,0.75);">
+              ${escapeHtml(roleMeta.label)}
+            </span>
+          </td>
+          <td class="mono">
+            <div style="display:inline-flex; align-items:center; gap:6px;">
+              <span style="color:${isRevealed ? '#67e8f9' : 'var(--text-muted)'};">${isRevealed ? escapeHtml(a.password || '') : '••••••••'}</span>
+              <button type="button" class="btn btn-sm btn-reveal-pass" data-id="${escapeHtml(a.id)}" style="height:22px; padding:0 6px;" title="Lihat/Sembunyikan Sandi">
+                <i data-lucide="${isRevealed ? 'eye-off' : 'eye'}" width="11" height="11"></i>
+              </button>
+            </div>
+          </td>
           <td>${escapeHtml(a.jabatan || '-')}</td>
           <td>${isActive ? '<span class="status-badge st-bebas">Aktif</span>' : '<span class="status-badge st-sengketa">Nonaktif</span>'}</td>
           <td class="mono" style="color:var(--text-muted);">${escapeHtml(formatShortDate(a.created_at))}</td>
@@ -274,25 +397,32 @@
         </tr>
       `;
     }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
   function openAdminModal(adminId = null) {
+    if (!RBAC_ROLES[state.role].canManageAccounts) {
+      showToast('Akses ditolak: Hanya Master yang dapat mengelola akun.', 'error');
+      return;
+    }
     state.editingAdminId = adminId;
     if (adminId) {
       const a = state.admins.find(item => item.id === adminId);
       if (!a) return;
-      el.adminModalTitle.innerHTML = `<i data-lucide="shield" width="15" height="15" style="color: var(--st-bebas);"></i> Edit Admin ${escapeHtml(a.id)}`;
+      el.adminModalTitle.innerHTML = `<i data-lucide="shield" width="15" height="15" style="color: var(--st-bebas);"></i> Edit Akun ${escapeHtml(a.id)}`;
       el.amName.value = a.nama_lengkap;
       el.amUsername.value = a.username;
       el.amEmail.value = a.email;
+      el.amRole.value = LStore.normalizeAdminRole(a.role, a.username || a.id);
       el.amJabatan.value = a.jabatan || '';
       el.amPassword.value = a.password;
       el.amActive.checked = a.is_active !== false;
     } else {
-      el.adminModalTitle.innerHTML = `<i data-lucide="shield-plus" width="15" height="15" style="color: var(--st-bebas);"></i> Tambah Admin Baru`;
+      el.adminModalTitle.innerHTML = `<i data-lucide="shield-plus" width="15" height="15" style="color: var(--st-bebas);"></i> Tambah Master / Admin`;
       el.amName.value = '';
       el.amUsername.value = '';
       el.amEmail.value = '';
+      el.amRole.value = 'admin';
       el.amJabatan.value = 'Koordinator Pengadaan Tanah';
       el.amPassword.value = '';
       el.amActive.checked = true;
@@ -303,10 +433,15 @@
 
   async function saveAdminFromModal(e) {
     e.preventDefault();
+    if (!RBAC_ROLES[state.role].canManageAccounts) {
+      showToast('Hanya role Master yang berhak mengelola tabel admins.', 'error');
+      return;
+    }
     const nama_lengkap = el.amName.value.trim();
     const username = el.amUsername.value.trim();
     const email = el.amEmail.value.trim();
-    const jabatan = el.amJabatan.value.trim() || 'Koordinator Pengadaan Tanah';
+    const role = el.amRole.value === 'master' ? 'master' : 'admin';
+    const jabatan = el.amJabatan.value.trim() || (role === 'master' ? 'Master Sistem' : 'Koordinator Pengadaan Tanah');
     const password = el.amPassword.value;
     const is_active = el.amActive.checked;
 
@@ -319,34 +454,41 @@
       if (state.editingAdminId) {
         const idx = state.admins.findIndex(a => a.id === state.editingAdminId);
         if (idx === -1) return;
-        const otherActiveAdmins = state.admins.filter((a, i) => i !== idx && a.is_active !== false);
-        if (!is_active && otherActiveAdmins.length === 0) {
-          showToast('Minimal harus ada 1 akun Admin aktif di tabel admins.', 'error');
+        const otherActiveMasters = state.admins.filter((a, i) =>
+          i !== idx &&
+          a.is_active !== false &&
+          LStore.normalizeAdminRole(a.role, a.username || a.id) === 'master'
+        );
+        const wasMaster = LStore.normalizeAdminRole(state.admins[idx].role, state.admins[idx].username || state.admins[idx].id) === 'master';
+        if (wasMaster && (role !== 'master' || !is_active) && otherActiveMasters.length === 0) {
+          showToast('Minimal harus tersisa 1 akun Master aktif.', 'error');
           return;
         }
         await LStore.updateAdminRecord(state.editingAdminId, {
           nama_lengkap,
           username,
           email,
+          role,
           jabatan,
           password,
           is_active
         });
         state.admins = LStore.loadAdmins();
-        await logAction(`Edit data admin ${state.editingAdminId} (${username}).`, 'admins');
-        showToast(`Data admin ${nama_lengkap} diperbarui di Supabase.`, 'success');
+        await logAction(`Edit data ${role} ${state.editingAdminId} (${username}).`, 'admins');
+        showToast(`Data akun ${nama_lengkap} (${role}) diperbarui di Supabase.`, 'success');
       } else {
         const created = await LStore.createAdminRecord({
           nama_lengkap,
           username,
           email,
           password,
+          role,
           jabatan,
           is_active
         });
         state.admins = LStore.loadAdmins();
-        await logAction(`Tambah admin baru ${created.id} (${username}) ke tabel admins.`, 'admins');
-        showToast(`Admin ${nama_lengkap} ditambahkan ke tabel admins Supabase.`, 'success');
+        await logAction(`Tambah ${role} baru ${created.id} (${username}) ke tabel admins.`, 'admins');
+        showToast(`Akun ${nama_lengkap} (${role}) ditambahkan ke Supabase.`, 'success');
       }
 
       el.adminModal.classList.remove('open');
@@ -358,13 +500,23 @@
   }
 
   // =========================================================================
-  // TAB 1B: TABEL USERS (SURVEYOR & VIEWER)
+  // TAB 1B: TABEL USERS (STAF AHLI & USER)
   // =========================================================================
   function renderUserTable() {
+    const perm = RBAC_ROLES[state.role] || RBAC_ROLES.user;
+    if (!perm.canManageAccounts && !perm.canViewUserEmails) {
+      el.admUserTableBody.innerHTML = '';
+      el.badgeUsersCount.textContent = 'TERKUNCI';
+      return;
+    }
+
+    const canViewPwd = Boolean(perm.canViewPasswords);
+    const canManage = Boolean(perm.canManageAccounts);
     const q = state.filters.userSearch.trim().toLowerCase();
     const roleFilter = state.filters.userRole;
     const list = state.users.filter(u => {
-      if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
+      const normalizedRole = LStore.normalizeUserRole(u.role);
+      if (roleFilter !== 'ALL' && normalizedRole !== roleFilter) return false;
       if (q && !`${u.id} ${u.nama_lengkap} ${u.username} ${u.email} ${u.unit_kerja}`.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -372,15 +524,27 @@
     el.badgeUsersCount.textContent = `${list.length} BARIS`;
 
     if (!list.length) {
+      const colCount = canManage ? 10 : 9;
       el.admUserTableBody.innerHTML = `
-        <tr><td colspan="9" style="text-align:center; padding: 18px; color: var(--text-muted);">Belum ada data pada tabel <span class="mono">users</span>. Klik "Tambah User" untuk menambahkan Surveyor atau Viewer.</td></tr>
+        <tr><td colspan="${colCount}" style="text-align:center; padding: 18px; color: var(--text-muted);">Belum ada data pada tabel <span class="mono">users</span>.</td></tr>
       `;
       return;
     }
 
     el.admUserTableBody.innerHTML = list.map(u => {
-      const roleMeta = RBAC_ROLES[u.role] || RBAC_ROLES.viewer;
+      const normalizedRole = LStore.normalizeUserRole(u.role);
+      const roleMeta = RBAC_ROLES[normalizedRole] || RBAC_ROLES.user;
       const isActive = u.is_active !== false;
+      const isRevealed = canViewPwd && (state.showUserPasswords || state.revealedPassIds.has(u.id));
+      const pwdCellHtml = canViewPwd
+        ? `<div style="display:inline-flex; align-items:center; gap:6px;">
+             <span style="color:${isRevealed ? '#67e8f9' : 'var(--text-muted)'};">${isRevealed ? escapeHtml(u.password || '') : '••••••••'}</span>
+             <button type="button" class="btn btn-sm btn-reveal-pass" data-id="${escapeHtml(u.id)}" style="height:22px; padding:0 6px;" title="Lihat/Sembunyikan Sandi">
+               <i data-lucide="${isRevealed ? 'eye-off' : 'eye'}" width="11" height="11"></i>
+             </button>
+           </div>`
+        : `<span class="lock-badge"><i data-lucide="lock" width="10" height="10"></i> Khusus Master</span>`;
+
       return `
         <tr>
           <td class="mono" style="color:#67e8f9; font-weight:700;">${escapeHtml(u.id)}</td>
@@ -393,21 +557,28 @@
               ${escapeHtml(roleMeta.label)}
             </span>
           </td>
+          <td class="mono">${pwdCellHtml}</td>
           <td>${isActive ? '<span class="status-badge st-bebas">Aktif</span>' : '<span class="status-badge st-sengketa">Nonaktif</span>'}</td>
           <td class="mono" style="color:var(--text-muted);">${escapeHtml(formatShortDate(u.created_at))}</td>
+          ${canManage ? `
           <td style="text-align: right;">
             <div style="display: inline-flex; gap: 5px;">
               <button type="button" class="btn btn-primary btn-sm btn-edit-user" data-id="${escapeHtml(u.id)}" style="height:24px;">Edit</button>
               <button type="button" class="btn btn-sm btn-toggle-user" data-id="${escapeHtml(u.id)}" style="height:24px;">${isActive ? 'Nonaktifkan' : 'Aktifkan'}</button>
               <button type="button" class="btn btn-danger btn-sm btn-del-user" data-id="${escapeHtml(u.id)}" style="height:24px;">Hapus</button>
             </div>
-          </td>
+          </td>` : ''}
         </tr>
       `;
     }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   }
 
   function openUserModal(userId = null) {
+    if (!RBAC_ROLES[state.role].canManageAccounts) {
+      showToast('Akses ditolak: Hanya Master yang dapat mengubah atau menambah akun user.', 'error');
+      return;
+    }
     state.editingUserId = userId;
     if (userId) {
       const u = state.users.find(item => item.id === userId);
@@ -417,7 +588,7 @@
       el.umUsername.value = u.username;
       el.umEmail.value = u.email;
       el.umUnit.value = u.unit_kerja || '';
-      el.umRole.value = u.role === 'viewer' ? 'viewer' : 'surveyor';
+      el.umRole.value = LStore.normalizeUserRole(u.role);
       el.umPassword.value = u.password;
       el.umActive.checked = u.is_active !== false;
     } else {
@@ -426,7 +597,7 @@
       el.umUsername.value = '';
       el.umEmail.value = '';
       el.umUnit.value = 'Tim Lapangan';
-      el.umRole.value = 'surveyor';
+      el.umRole.value = 'user';
       el.umPassword.value = '';
       el.umActive.checked = true;
     }
@@ -436,11 +607,15 @@
 
   async function saveUserFromModal(e) {
     e.preventDefault();
+    if (!RBAC_ROLES[state.role].canManageAccounts) {
+      showToast('Hanya role Master yang berhak mengelola akun user.', 'error');
+      return;
+    }
     const nama_lengkap = el.umName.value.trim();
     const username = el.umUsername.value.trim();
     const email = el.umEmail.value.trim();
     const unit_kerja = el.umUnit.value.trim() || 'Tim Lapangan';
-    const role = el.umRole.value === 'viewer' ? 'viewer' : 'surveyor';
+    const role = LStore.normalizeUserRole(el.umRole.value);
     const password = el.umPassword.value;
     const is_active = el.umActive.checked;
 
@@ -745,13 +920,35 @@
   // =========================================================================
   function renderLogsTable() {
     el.tabLogCount.textContent = state.logs.length;
-    if (!state.logs.length) {
+    const perm = RBAC_ROLES[state.role] || RBAC_ROLES.user;
+    if (!perm.canViewLogs) {
+      el.admLogTableBody.innerHTML = '';
+      return;
+    }
+
+    const q = (state.filters.logSearch || '').trim().toLowerCase();
+    const logType = state.filters.logType || 'ALL';
+    const filtered = state.logs.filter(item => {
+      const pageNorm = String(item.page || '').toLowerCase();
+      const textNorm = String(item.text || '').toLowerCase();
+      const typeNorm = String(item.accountType || '').toLowerCase();
+      const isLogin = pageNorm === 'login' || textNorm.includes('login berhasil') || textNorm.includes('masuk ke sistem');
+      const isDataChange = ['parcels', 'project_settings', 'database'].includes(typeNorm)
+        || /\b(update|edit|tambah|hapus|import|bulk|konfigurasi|row)\b/i.test(item.text || '');
+
+      if (logType === 'LOGIN' && !isLogin) return false;
+      if (logType === 'DATA' && !isDataChange) return false;
+      if (q && !`${item.actor} ${item.accountType} ${item.page} ${item.text}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+
+    if (!filtered.length) {
       el.admLogTableBody.innerHTML = `
-        <tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-muted);">Belum ada riwayat log aktivitas.</td></tr>
+        <tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-muted);">Tidak ada log aktivitas yang cocok dengan filter.</td></tr>
       `;
       return;
     }
-    el.admLogTableBody.innerHTML = state.logs.map(item => `
+    el.admLogTableBody.innerHTML = filtered.map(item => `
       <tr>
         <td class="mono" style="color:var(--text-secondary);">${escapeHtml(item.date || '-')}</td>
         <td class="mono">${escapeHtml(item.time)}</td>
@@ -768,36 +965,50 @@
   // =========================================================================
   document.querySelectorAll('.admin-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const target = btn.getAttribute('data-tab');
-      state.activeTab = target;
-      document.querySelectorAll('.admin-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
-      document.getElementById('panelAccounts').classList.toggle('active', target === 'accounts');
-      document.getElementById('panelParcels').classList.toggle('active', target === 'parcels');
-      document.getElementById('panelProject').classList.toggle('active', target === 'project');
-      document.getElementById('panelLogs').classList.toggle('active', target === 'logs');
+      setActiveAdminTab(btn.getAttribute('data-tab'));
     });
   });
 
   el.roleSelect.addEventListener('change', () => {
-    if (state.originRole !== 'admin') return;
-    state.role = el.roleSelect.value;
+    const originPerm = RBAC_ROLES[state.originRole];
+    if (!originPerm || !originPerm.canSwitchRolePreview) return;
+    state.role = LStore.normalizeAnyRole(el.roleSelect.value);
     state.session.role = state.role;
     LStore.saveSession(state.session);
     applyRbacGuard();
+    renderSummaryKpis();
     showToast(`Mode pratinjau role diubah ke: ${RBAC_ROLES[state.role].label}`, 'info');
   });
 
   el.btnLogout.addEventListener('click', async () => {
     try {
-      await LStore.pushLog(state.session.name, state.session.table || 'admins', 'Kelola', 'Keluar dari Konsol Admin.');
+      await LStore.pushLog(state.session.name, state.session.table || 'admins', 'Kelola', 'Keluar dari Konsol.');
     } catch (_err) {}
     LStore.clearSession();
     window.location.href = 'index.html';
   });
 
+  // Logs filters
+  el.admLogSearch.addEventListener('input', () => {
+    state.filters.logSearch = el.admLogSearch.value;
+    renderLogsTable();
+  });
+  el.admLogFilter.addEventListener('change', () => {
+    state.filters.logType = el.admLogFilter.value;
+    renderLogsTable();
+  });
+
   // Admins table filters & actions
   el.admSearchAdmin.addEventListener('input', () => {
     state.filters.adminSearch = el.admSearchAdmin.value;
+    renderAdminTable();
+  });
+  el.btnToggleAllAdminPass.addEventListener('click', () => {
+    if (!RBAC_ROLES[state.role].canViewPasswords) return;
+    state.showAdminPasswords = !state.showAdminPasswords;
+    el.btnToggleAllAdminPass.innerHTML = state.showAdminPasswords
+      ? '<i data-lucide="eye-off" width="12" height="12"></i> Sembunyikan Sandi'
+      : '<i data-lucide="eye" width="12" height="12"></i> Tampilkan Sandi';
     renderAdminTable();
   });
   el.btnAddAdmin.addEventListener('click', () => openAdminModal(null));
@@ -806,6 +1017,18 @@
   el.adminForm.addEventListener('submit', saveAdminFromModal);
 
   el.admAdminTableBody.addEventListener('click', async e => {
+    const revealBtn = e.target.closest('.btn-reveal-pass');
+    if (revealBtn) {
+      if (!RBAC_ROLES[state.role].canViewPasswords) return;
+      const aid = revealBtn.getAttribute('data-id');
+      if (state.revealedPassIds.has(aid)) state.revealedPassIds.delete(aid);
+      else state.revealedPassIds.add(aid);
+      renderAdminTable();
+      return;
+    }
+
+    if (!RBAC_ROLES[state.role].canManageAccounts) return;
+
     const editBtn = e.target.closest('.btn-edit-admin');
     if (editBtn) {
       openAdminModal(editBtn.getAttribute('data-id'));
@@ -818,9 +1041,14 @@
       const target = state.admins.find(a => a.id === aid);
       if (!target) return;
       const nextActive = target.is_active === false;
-      const otherActive = state.admins.filter(a => a.id !== aid && a.is_active !== false);
-      if (!nextActive && otherActive.length === 0) {
-        showToast('Minimal harus tersisa 1 Admin aktif di tabel admins.', 'error');
+      const isMasterTarget = LStore.normalizeAdminRole(target.role, target.username || target.id) === 'master';
+      const otherActiveMasters = state.admins.filter(a =>
+        a.id !== aid &&
+        a.is_active !== false &&
+        LStore.normalizeAdminRole(a.role, a.username || a.id) === 'master'
+      );
+      if (!nextActive && isMasterTarget && otherActiveMasters.length === 0) {
+        showToast('Minimal harus tersisa 1 akun Master aktif.', 'error');
         return;
       }
       try {
@@ -828,9 +1056,9 @@
         state.admins = LStore.loadAdmins();
         renderSummaryKpis();
         renderAdminTable();
-        await logAction(`${nextActive ? 'Aktifkan' : 'Nonaktifkan'} admin ${target.username}.`, 'admins');
+        await logAction(`${nextActive ? 'Aktifkan' : 'Nonaktifkan'} akun ${target.username}.`, 'admins');
       } catch (err) {
-        showToast(`Gagal memperbarui status admin: ${err.message}`, 'error');
+        showToast(`Gagal memperbarui status akun: ${err.message}`, 'error');
       }
       return;
     }
@@ -840,19 +1068,24 @@
       const aid = delBtn.getAttribute('data-id');
       const target = state.admins.find(a => a.id === aid);
       if (!target) return;
-      const otherActive = state.admins.filter(a => a.id !== aid && a.is_active !== false);
-      if (otherActive.length === 0) {
-        showToast('Tidak dapat menghapus satu-satunya Admin aktif.', 'error');
+      const isMasterTarget = LStore.normalizeAdminRole(target.role, target.username || target.id) === 'master';
+      const otherActiveMasters = state.admins.filter(a =>
+        a.id !== aid &&
+        a.is_active !== false &&
+        LStore.normalizeAdminRole(a.role, a.username || a.id) === 'master'
+      );
+      if (isMasterTarget && otherActiveMasters.length === 0) {
+        showToast('Tidak dapat menghapus satu-satunya Master aktif.', 'error');
         return;
       }
       try {
         state.admins = await LStore.deleteAdminRecord(aid);
         renderSummaryKpis();
         renderAdminTable();
-        await logAction(`Hapus admin ${target.username} dari tabel admins.`, 'admins');
-        showToast(`Admin ${target.nama_lengkap} dihapus dari Supabase.`, 'warn');
+        await logAction(`Hapus akun ${target.username} dari tabel admins.`, 'admins');
+        showToast(`Akun ${target.nama_lengkap} dihapus dari Supabase.`, 'warn');
       } catch (err) {
-        showToast(`Gagal menghapus admin: ${err.message}`, 'error');
+        showToast(`Gagal menghapus akun: ${err.message}`, 'error');
       }
     }
   });
@@ -866,12 +1099,32 @@
     state.filters.userRole = el.admFilterUserRole.value;
     renderUserTable();
   });
+  el.btnToggleAllUserPass.addEventListener('click', () => {
+    if (!RBAC_ROLES[state.role].canViewPasswords) return;
+    state.showUserPasswords = !state.showUserPasswords;
+    el.btnToggleAllUserPass.innerHTML = state.showUserPasswords
+      ? '<i data-lucide="eye-off" width="12" height="12"></i> Sembunyikan Sandi'
+      : '<i data-lucide="eye" width="12" height="12"></i> Tampilkan Sandi';
+    renderUserTable();
+  });
   el.btnAddUser.addEventListener('click', () => openUserModal(null));
   el.btnCloseUserModal.addEventListener('click', () => el.userModal.classList.remove('open'));
   el.btnCancelUserModal.addEventListener('click', () => el.userModal.classList.remove('open'));
   el.userForm.addEventListener('submit', saveUserFromModal);
 
   el.admUserTableBody.addEventListener('click', async e => {
+    const revealBtn = e.target.closest('.btn-reveal-pass');
+    if (revealBtn) {
+      if (!RBAC_ROLES[state.role].canViewPasswords) return;
+      const uid = revealBtn.getAttribute('data-id');
+      if (state.revealedPassIds.has(uid)) state.revealedPassIds.delete(uid);
+      else state.revealedPassIds.add(uid);
+      renderUserTable();
+      return;
+    }
+
+    if (!RBAC_ROLES[state.role].canManageAccounts) return;
+
     const editBtn = e.target.closest('.btn-edit-user');
     if (editBtn) {
       openUserModal(editBtn.getAttribute('data-id'));
@@ -1047,6 +1300,10 @@
   // Project config & spatial/db tools
   el.projectConfigForm.addEventListener('submit', async e => {
     e.preventDefault();
+    if (!RBAC_ROLES[state.role].canManageProject) {
+      showToast('Akses ditolak: Hanya Master & Admin yang dapat mengubah konfigurasi proyek.', 'error');
+      return;
+    }
     const nextProject = {
       name: el.cfgName.value.trim(),
       code: el.cfgCode.value.trim(),
@@ -1143,13 +1400,28 @@
   });
 
   el.admBtnBackupDb.addEventListener('click', () => {
+    if (!RBAC_ROLES[state.role].canBackupRestore) {
+      showToast('Akses ditolak: Backup database (berisi kata sandi) khusus untuk Master.', 'error');
+      return;
+    }
     LStore.exportDatabaseBackupJson();
     logAction('Export backup seluruh database (.json).', 'database');
     showToast('Backup database JSON berhasil diunduh.', 'success');
   });
 
-  el.admBtnRestoreDb.addEventListener('click', () => el.admRestoreFileInput.click());
+  el.admBtnRestoreDb.addEventListener('click', () => {
+    if (!RBAC_ROLES[state.role].canBackupRestore) {
+      showToast('Akses ditolak: Restore database khusus untuk Master.', 'error');
+      return;
+    }
+    el.admRestoreFileInput.click();
+  });
   el.admRestoreFileInput.addEventListener('change', async e => {
+    if (!RBAC_ROLES[state.role].canBackupRestore) {
+      el.admRestoreFileInput.value = '';
+      showToast('Akses ditolak: Restore database khusus untuk Master.', 'error');
+      return;
+    }
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     try {
@@ -1177,6 +1449,10 @@
   });
 
   el.admBtnClearData.addEventListener('click', async () => {
+    if (!RBAC_ROLES[state.role].canBackupRestore) {
+      showToast('Akses ditolak: Reset tabel operasional khusus untuk Master.', 'error');
+      return;
+    }
     try {
       await LStore.clearOperationalTables();
       state.parcels = [];
@@ -1195,6 +1471,10 @@
   });
 
   el.btnClearLogs.addEventListener('click', async () => {
+    if (!RBAC_ROLES[state.role].canManageLogs) {
+      showToast('Akses ditolak: Hanya Master yang dapat membersihkan log audit.', 'error');
+      return;
+    }
     try {
       state.logs = await LStore.clearLogs();
       renderSummaryKpis();

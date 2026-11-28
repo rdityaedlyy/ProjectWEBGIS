@@ -18,8 +18,8 @@
 
   const state = {
     session,
-    role: session.role || 'viewer',
-    originRole: session.originRole || session.role || 'viewer',
+    role: LStore.normalizeAnyRole(session.role || 'user'),
+    originRole: LStore.normalizeAnyRole(session.originRole || session.role || 'user'),
     projectCfg: LStore.loadProjectConfig(),
     parcels: [],
     rowFeatures: [],
@@ -49,6 +49,7 @@
   const el = {
     projectSubtitle: document.getElementById('projectSubtitle'),
     navAdminTab: document.getElementById('navAdminTab'),
+    navAdminLabel: document.getElementById('navAdminLabel'),
     headerUserName: document.getElementById('headerUserName'),
     roleSelect: document.getElementById('roleSelect'),
     roleDot: document.getElementById('roleDot'),
@@ -138,6 +139,7 @@
     inspectorActionRow: document.getElementById('inspectorActionRow'),
     btnSaveParcel: document.getElementById('btnSaveParcel'),
     btnRevertParcel: document.getElementById('btnRevertParcel'),
+    activityLogSection: document.getElementById('activityLogSection'),
     activityLogList: document.getElementById('activityLogList'),
 
     importModal: document.getElementById('importModal'),
@@ -169,6 +171,10 @@
   }
 
   function renderActivityLogs() {
+    if (!RBAC_ROLES[state.role] || !RBAC_ROLES[state.role].canViewLogs) {
+      el.activityLogList.innerHTML = '';
+      return;
+    }
     if (!state.logs.length) {
       el.activityLogList.innerHTML = '<div style="font-size:11px; color: var(--text-muted); padding: 6px 0;">Belum ada aktivitas tercatat di database.</div>';
       return;
@@ -816,12 +822,13 @@
   }
 
   function applyRoleUI() {
-    const perm = RBAC_ROLES[state.role];
+    const perm = RBAC_ROLES[state.role] || RBAC_ROLES.user;
+    const originPerm = RBAC_ROLES[state.originRole] || perm;
     el.roleSelect.value = state.role;
-    el.roleSelect.disabled = state.originRole !== 'admin';
-    el.roleSelect.title = state.originRole === 'admin'
-      ? 'Simulasi Tampilan Role RBAC'
-      : `Role terkunci sesuai akun database (${RBAC_ROLES[state.originRole].label})`;
+    el.roleSelect.disabled = !originPerm.canSwitchRolePreview;
+    el.roleSelect.title = originPerm.canSwitchRolePreview
+      ? 'Mode Master: Simulasi Tampilan Role RBAC'
+      : `Role terkunci sesuai akun database (${originPerm.label})`;
     el.roleDot.style.background = perm.color;
 
     el.rbacBanner.className = `rbac-banner ${perm.bannerClass}`;
@@ -832,16 +839,25 @@
     el.rbacBannerTitle.textContent = perm.label;
     el.rbacBannerDesc.textContent = perm.desc;
 
+    el.btnOpenImport.style.display = perm.canImport ? 'inline-flex' : 'none';
     el.btnOpenImport.disabled = !perm.canImport;
     el.btnOpenImport.title = perm.canImport
       ? 'Import GeoJSON, Shapefile (.zip), atau Excel (.xlsx)'
-      : 'Terkunci: Hanya Admin / Koordinator yang dapat mengimport dataset';
+      : 'Terkunci: Hanya Master / Admin / Staf Ahli yang dapat mengimport dataset';
 
+    el.navAdminTab.style.display = perm.canAccessAdmin ? 'inline-flex' : 'none';
     el.navAdminTab.classList.toggle('locked-tab', !perm.canAccessAdmin);
+    if (el.navAdminLabel) {
+      el.navAdminLabel.textContent = state.role === 'staf_ahli' ? 'Kelola Data' : 'Kelola / Admin';
+    }
     el.navAdminTab.title = perm.canAccessAdmin
-      ? 'Buka Konsol Kelola / Admin'
-      : 'Khusus Admin / Koordinator';
+      ? (state.role === 'staf_ahli' ? 'Buka Panel Tambah/Edit/Hapus Data Persil' : 'Buka Konsol Admin')
+      : 'Khusus Master / Admin / Staf Ahli';
 
+    if (el.activityLogSection) {
+      el.activityLogSection.style.display = perm.canViewLogs ? 'block' : 'none';
+    }
+    renderActivityLogs();
     applyRbacToInspectorFields();
   }
 
@@ -975,8 +991,9 @@
   // EVENT BINDINGS
   // =========================================================================
   el.roleSelect.addEventListener('change', () => {
-    if (state.originRole !== 'admin') return;
-    state.role = el.roleSelect.value;
+    const originPerm = RBAC_ROLES[state.originRole];
+    if (!originPerm || !originPerm.canSwitchRolePreview) return;
+    state.role = LStore.normalizeAnyRole(el.roleSelect.value);
     state.session.role = state.role;
     LStore.saveSession(state.session);
     applyRoleUI();

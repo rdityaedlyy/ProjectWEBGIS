@@ -173,8 +173,9 @@
             Masuk
           </button>
 
-          <div class="mono" style="font-size: 11px; color: var(--text-secondary); background: rgba(15, 23, 42, 0.72); border: 1px solid var(--border-subtle); padding: 7px 10px;">
-            Admin sementara: username <strong style="color: #67e8f9;">admin</strong> • sandi <strong style="color: #67e8f9;">admin123</strong>
+          <div class="mono" style="font-size: 11px; color: var(--text-secondary); background: rgba(15, 23, 42, 0.72); border: 1px solid var(--border-subtle); padding: 7px 10px; line-height: 1.55;">
+            Master: <strong style="color: #c084fc;">master</strong> / <strong style="color: #c084fc;">master123</strong> &bull;
+            Admin: <strong style="color: #67e8f9;">admin</strong> / <strong style="color: #67e8f9;">admin123</strong>
           </div>
 
           <div class="auth-switch-note">
@@ -207,9 +208,10 @@
           <div class="form-group" style="margin-bottom: 0;">
             <label class="field-label" for="regRole">Role Akses</label>
             <select id="regRole" class="select">
-              <option value="surveyor">Surveyor / Lapangan</option>
-              <option value="viewer">Viewer / Eksekutif</option>
-              <option value="admin">Admin / Koordinator</option>
+              <option value="user" selected>User / Pengguna (Hanya Lihat Data)</option>
+              <option value="staf_ahli">Staf Ahli (Tambah / Edit / Hapus Data)</option>
+              <option value="admin">Admin (Pantau Log, Data &amp; Email User)</option>
+              <option value="master">Master (Akses Penuh 100%)</option>
             </select>
           </div>
 
@@ -243,8 +245,8 @@
     </main>
 
     <footer class="login-footer">
-      <span>LANDACQ // Sistem WebGIS Pengadaan Tanah (Database Manual Tanpa Dummy)</span>
-      <span class="mono">Tabel Terpisah: admins • users • parcels (IndexedDB)</span>
+      <span>LANDACQ // Sistem WebGIS Pengadaan Tanah (Supabase Cloud DB)</span>
+      <span class="mono">4 Role RBAC: Master &bull; Admin &bull; Staf Ahli &bull; User</span>
     </footer>
   </div>
 

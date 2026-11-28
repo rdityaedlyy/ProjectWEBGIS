@@ -1074,8 +1074,11 @@ table.attr-table td {
   background: rgba(15, 23, 42, 0.72);
   border-left: 3px solid var(--accent-cyan);
 }
+.rbac-banner.role-master { border-left-color: #a855f7; }
 .rbac-banner.role-admin { border-left-color: #10b981; }
+.rbac-banner.role-staf,
 .rbac-banner.role-surveyor { border-left-color: #f59e0b; }
+.rbac-banner.role-user,
 .rbac-banner.role-viewer { border-left-color: #64748b; }
 
 .parcel-hero {

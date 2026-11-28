@@ -49,7 +49,7 @@
         </a>
         <a id="navAdminTab" href="admin.html" class="nav-tab">
           <i data-lucide="settings-2" width="13" height="13"></i>
-          <span class="nav-txt">Kelola / Admin</span>
+          <span id="navAdminLabel" class="nav-txt">Kelola / Admin</span>
         </a>
       </nav>
     </div>
@@ -66,9 +66,10 @@
           <span class="lbl-txt">Role:</span>
         </span>
         <select id="roleSelect" class="role-select" aria-label="Pilih Hak Akses">
-          <option value="admin">Admin / Koordinator</option>
-          <option value="surveyor">Surveyor / Lapangan</option>
-          <option value="viewer">Viewer / Eksekutif</option>
+          <option value="master">Master (100%)</option>
+          <option value="admin">Admin</option>
+          <option value="staf_ahli">Staf Ahli</option>
+          <option value="user">User / Pengguna</option>
         </select>
       </div>
 
@@ -408,7 +409,7 @@
             <div class="form-group" style="margin-bottom: 0;">
               <label class="field-label" for="editPemilik">
                 <span>Nama Pemilik</span>
-                <span id="lockPemilik" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Admin</span>
+                <span id="lockPemilik" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Terkunci</span>
               </label>
               <input id="editPemilik" class="input" type="text" required />
             </div>
@@ -416,7 +417,7 @@
             <div class="form-group" style="margin-bottom: 0;">
               <label class="field-label" for="editDesa">
                 <span>Desa / Kelurahan</span>
-                <span id="lockDesa" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Admin</span>
+                <span id="lockDesa" class="lock-badge" style="display: none;"><i data-lucide="lock" width="10" height="10"></i> Terkunci</span>
               </label>
               <input id="editDesa" class="input" type="text" required />
             </div>
@@ -491,7 +492,7 @@
         </form>
 
         <!-- Recent Activity Feed -->
-        <section class="panel-section">
+        <section id="activityLogSection" class="panel-section">
           <div class="section-head">
             <span class="section-title">
               <i data-lucide="history" width="13" height="13" style="color: var(--accent-cyan);"></i>

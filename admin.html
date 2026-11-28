@@ -39,7 +39,7 @@
         </a>
         <a href="admin.html" class="nav-tab active">
           <i data-lucide="settings-2" width="13" height="13"></i>
-          <span class="nav-txt">Kelola / Admin</span>
+          <span id="navAdminLabel" class="nav-txt">Kelola / Admin</span>
         </a>
       </nav>
     </div>
@@ -56,9 +56,10 @@
           <span class="lbl-txt">Role:</span>
         </span>
         <select id="roleSelect" class="role-select" aria-label="Pilih Hak Akses">
-          <option value="admin">Admin / Koordinator</option>
-          <option value="surveyor">Surveyor / Lapangan</option>
-          <option value="viewer">Viewer / Eksekutif</option>
+          <option value="master">Master (100%)</option>
+          <option value="admin">Admin</option>
+          <option value="staf_ahli">Staf Ahli</option>
+          <option value="user">User / Pengguna</option>
         </select>
       </div>
 
@@ -74,7 +75,7 @@
       <i data-lucide="shield-alert" width="38" height="38" style="color: var(--st-sengketa);"></i>
       <h2 style="margin: 0; font-size: 18px; color: var(--text-primary);">Akses Halaman Kelola Dibatasi</h2>
       <p style="margin: 0; font-size: 12.5px; color: var(--text-secondary); line-height: 1.55;">
-        Role aktif Anda (<strong id="guardRoleName" style="color: #fbbf24;"></strong>) berasal dari tabel <span class="mono">users</span> sehingga tidak memiliki hak akses untuk mengelola tabel <span class="mono">admins</span>, <span class="mono">users</span>, maupun konfigurasi database.
+        Role aktif Anda (<strong id="guardRoleName" style="color: #fbbf24;"></strong>) hanya memiliki akses melihat peta dan data persil secara Read-Only, sehingga tidak dapat mengakses konsol pengelolaan.
       </p>
       <div style="display: flex; gap: 10px; margin-top: 6px;">
         <a href="peta.html" class="btn btn-primary" style="text-decoration: none;">
@@ -89,19 +90,19 @@
     <!-- Sub-Navigation Tabs -->
     <div class="admin-subnav">
       <div class="admin-tabs">
-        <button class="admin-tab-btn active" data-tab="accounts">
+        <button id="tabBtnAccounts" class="admin-tab-btn active" data-tab="accounts">
           <i data-lucide="users" width="13" height="13"></i>
-          Tabel Admin &amp; User (<span id="tabAccountCount" class="mono">0</span>)
+          <span id="tabAccountLabel">Akun &amp; Email</span> (<span id="tabAccountCount" class="mono">0</span>)
         </button>
-        <button class="admin-tab-btn" data-tab="parcels">
+        <button id="tabBtnParcels" class="admin-tab-btn" data-tab="parcels">
           <i data-lucide="layers" width="13" height="13"></i>
           Tabel Persil (<span id="tabParcelCount" class="mono">0</span>)
         </button>
-        <button class="admin-tab-btn" data-tab="project">
+        <button id="tabBtnProject" class="admin-tab-btn" data-tab="project">
           <i data-lucide="database" width="13" height="13"></i>
-          Database, Proyek &amp; Import
+          <span id="tabProjectLabel">Proyek &amp; Import/Export</span>
         </button>
-        <button class="admin-tab-btn" data-tab="logs">
+        <button id="tabBtnLogs" class="admin-tab-btn" data-tab="logs">
           <i data-lucide="history" width="13" height="13"></i>
           Log Audit (<span id="tabLogCount" class="mono">0</span>)
         </button>
@@ -117,48 +118,51 @@
     <!-- Scrollable Content -->
     <div class="admin-content">
       <!-- KPI Strip -->
-      <section class="admin-kpi-strip">
-        <div class="kpi-card kpi-green">
-          <div class="kpi-label"><span>Tabel Admins</span><i data-lucide="shield-check" width="12" height="12"></i></div>
+      <section id="adminKpiStrip" class="admin-kpi-strip">
+        <div id="kpiCardAdmins" class="kpi-card kpi-green">
+          <div class="kpi-label"><span>Tabel Master &amp; Admin</span><i data-lucide="shield-check" width="12" height="12"></i></div>
           <div id="admKpiAdmins" class="kpi-val mono">0</div>
-          <div id="admKpiAdminsActive" class="kpi-sub">0 admin aktif</div>
+          <div id="admKpiAdminsActive" class="kpi-sub">0 akun aktif</div>
         </div>
-        <div class="kpi-card kpi-blue">
+        <div id="kpiCardUsers" class="kpi-card kpi-blue">
           <div class="kpi-label"><span>Tabel Users</span><i data-lucide="users" width="12" height="12"></i></div>
           <div id="admKpiUsers" class="kpi-val mono">0</div>
-          <div id="admKpiUsersBreakdown" class="kpi-sub">0 surveyor • 0 viewer</div>
+          <div id="admKpiUsersBreakdown" class="kpi-sub">0 staf ahli • 0 user</div>
         </div>
-        <div class="kpi-card">
+        <div id="kpiCardParcels" class="kpi-card">
           <div class="kpi-label"><span>Tabel Persil</span><i data-lucide="layers" width="12" height="12"></i></div>
           <div id="admKpiTotal" class="kpi-val mono">0</div>
           <div id="admKpiLuasSub" class="kpi-sub mono">0 m² (0,00 Ha)</div>
         </div>
-        <div class="kpi-card kpi-amber">
+        <div id="kpiCardUgr" class="kpi-card kpi-amber">
           <div class="kpi-label"><span>Total Anggaran UGR</span><i data-lucide="banknote" width="12" height="12"></i></div>
           <div id="admKpiUgr" class="kpi-val mono">Rp 0</div>
           <div id="admKpiBebasSub" class="kpi-sub mono">0% terbebaskan</div>
         </div>
       </section>
 
-      <!-- TAB 1: TABEL ADMIN & TABEL USER TERPISAH -->
+      <!-- TAB 1: TABEL AKUN TERPISAH -->
       <section id="panelAccounts" class="admin-panel active">
-        <!-- TABLE 1: ADMINS -->
-        <div class="db-table-block admin-accent">
+        <!-- TABLE 1: ADMINS (MASTER ONLY) -->
+        <div id="blockAdminsTable" class="db-table-block admin-accent">
           <div class="db-table-header">
             <div class="db-table-title">
-              <i data-lucide="shield-check" width="16" height="16" style="color: var(--st-bebas);"></i>
-              <span>Tabel Administrator</span>
+              <i data-lucide="crown" width="16" height="16" style="color: #c084fc;"></i>
+              <span>Tabel Master &amp; Administrator</span>
               <span class="db-badge-table">TABLE: admins</span>
               <span id="badgeAdminsCount" class="count-pill mono">0 BARIS</span>
             </div>
 
             <div class="admin-toolbar-group">
-              <div class="input-wrap" style="width: 210px;">
+              <div class="input-wrap" style="width: 200px;">
                 <span class="input-icon"><i data-lucide="search" width="12" height="12"></i></span>
-                <input id="admSearchAdmin" class="input with-icon" type="text" placeholder="Cari admin..." style="height: 28px; font-size: 11.5px;" />
+                <input id="admSearchAdmin" class="input with-icon" type="text" placeholder="Cari master/admin..." style="height: 28px; font-size: 11.5px;" />
               </div>
+              <button id="btnToggleAllAdminPass" class="btn btn-sm" type="button" style="height: 28px;">
+                <i data-lucide="eye" width="12" height="12"></i> Tampilkan Sandi
+              </button>
               <button id="btnAddAdmin" class="btn btn-success btn-sm" type="button" style="height: 28px;">
-                <i data-lucide="shield-plus" width="13" height="13"></i> Tambah Admin
+                <i data-lucide="shield-plus" width="13" height="13"></i> Tambah Master / Admin
               </button>
             </div>
           </div>
@@ -171,6 +175,8 @@
                   <th>Nama Lengkap</th>
                   <th>Username</th>
                   <th>Email</th>
+                  <th>Role</th>
+                  <th>Kata Sandi</th>
                   <th>Jabatan / Divisi</th>
                   <th>Status</th>
                   <th>Dibuat</th>
@@ -182,12 +188,12 @@
           </div>
         </div>
 
-        <!-- TABLE 2: USERS (SURVEYOR & VIEWER) -->
-        <div class="db-table-block user-accent">
+        <!-- TABLE 2: USERS (STAF AHLI & USER) -->
+        <div id="blockUsersTable" class="db-table-block user-accent">
           <div class="db-table-header">
             <div class="db-table-title">
               <i data-lucide="users" width="16" height="16" style="color: var(--st-bayar);"></i>
-              <span>Tabel Pengguna Operasional (Surveyor &amp; Viewer)</span>
+              <span>Tabel Pengguna (Staf Ahli &amp; User)</span>
               <span class="db-badge-table">TABLE: users</span>
               <span id="badgeUsersCount" class="count-pill mono">0 BARIS</span>
             </div>
@@ -195,18 +201,23 @@
             <div class="admin-toolbar-group">
               <div class="input-wrap" style="width: 190px;">
                 <span class="input-icon"><i data-lucide="search" width="12" height="12"></i></span>
-                <input id="admSearchUser" class="input with-icon" type="text" placeholder="Cari user..." style="height: 28px; font-size: 11.5px;" />
+                <input id="admSearchUser" class="input with-icon" type="text" placeholder="Cari nama / email..." style="height: 28px; font-size: 11.5px;" />
               </div>
               <select id="admFilterUserRole" class="select" style="width: 165px; height: 28px; padding: 2px 8px; font-size: 11.5px;">
                 <option value="ALL">Semua Role User</option>
-                <option value="surveyor">Surveyor / Lapangan</option>
-                <option value="viewer">Viewer / Eksekutif</option>
+                <option value="staf_ahli">Staf Ahli</option>
+                <option value="user">User / Pengguna</option>
               </select>
+              <button id="btnToggleAllUserPass" class="btn btn-sm" type="button" style="height: 28px;">
+                <i data-lucide="eye" width="12" height="12"></i> Tampilkan Sandi
+              </button>
               <button id="btnAddUser" class="btn btn-primary btn-sm" type="button" style="height: 28px;">
                 <i data-lucide="user-plus" width="13" height="13"></i> Tambah User
               </button>
             </div>
           </div>
+
+          <div id="usersAccessNote" class="mono" style="font-size: 11px; color: var(--text-secondary); padding: 4px 2px 2px;"></div>
 
           <div class="admin-table-card compact-card">
             <table class="attr-table">
@@ -218,9 +229,10 @@
                   <th>Email</th>
                   <th>Unit Kerja</th>
                   <th>Role</th>
+                  <th id="thUserPass">Kata Sandi</th>
                   <th>Status</th>
                   <th>Dibuat</th>
-                  <th style="text-align: right;">Aksi</th>
+                  <th id="thUserActions" style="text-align: right;">Aksi</th>
                 </tr>
               </thead>
               <tbody id="admUserTableBody"></tbody>
@@ -303,9 +315,9 @@
 
       <!-- TAB 3: DATABASE, PROYEK & IMPORT/EXPORT -->
       <section id="panelProject" class="admin-panel">
-        <div class="admin-grid-2">
+        <div id="projectGridContainer" class="admin-grid-2">
           <!-- Project Settings Form -->
-          <div class="panel-section" style="padding: 14px;">
+          <div id="projectConfigCard" class="panel-section" style="padding: 14px;">
             <div class="section-head">
               <span class="section-title">
                 <i data-lucide="sliders" width="14" height="14" style="color: var(--accent-cyan);"></i>
@@ -402,8 +414,8 @@
               </button>
             </div>
 
-            <div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
-              <div class="field-label">Backup / Restore / Kosongkan Database Manual</div>
+            <div id="admDbToolsBox" style="padding-top: 8px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
+              <div class="field-label">Backup / Restore / Kosongkan Database (Khusus Master)</div>
               <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;">
                 <button id="admBtnBackupDb" type="button" class="btn btn-sm">Backup DB (.json)</button>
                 <button id="admBtnRestoreDb" type="button" class="btn btn-sm">Restore DB (.json)</button>
@@ -421,8 +433,19 @@
       <!-- TAB 4: LOG AUDIT -->
       <section id="panelLogs" class="admin-panel">
         <div class="admin-toolbar">
-          <div style="font-size: 12px; color: var(--text-secondary);">
-            Riwayat perubahan tabel <span class="mono">admins</span>, <span class="mono">users</span>, <span class="mono">parcels</span>, dan autentikasi.
+          <div class="admin-toolbar-group" style="flex: 1;">
+            <div class="input-wrap" style="width: 220px;">
+              <span class="input-icon"><i data-lucide="search" width="13" height="13"></i></span>
+              <input id="admLogSearch" class="input with-icon" type="text" placeholder="Cari nama user / aktivitas..." />
+            </div>
+            <select id="admLogFilter" class="select" style="width: 210px;">
+              <option value="ALL">Semua Aktivitas</option>
+              <option value="LOGIN">Log User Login</option>
+              <option value="DATA">Log Perubahan Data</option>
+            </select>
+            <span style="font-size: 11.5px; color: var(--text-secondary);">
+              Pantau siapa saja yang login serta data persil/proyek yang diperbarui.
+            </span>
           </div>
           <button id="btnClearLogs" class="btn btn-danger btn-sm" type="button">
             <i data-lucide="trash" width="12" height="12"></i> Bersihkan Log
@@ -454,7 +477,7 @@
       <div class="modal-head">
         <span id="adminModalTitle" class="modal-title">
           <i data-lucide="shield-plus" width="15" height="15" style="color: var(--st-bebas);"></i>
-          Tambah Admin Baru
+          Tambah Master / Admin
         </span>
         <button id="btnCloseAdminModal" class="btn btn-icon btn-sm" type="button">
           <i data-lucide="x" width="14" height="14"></i>
@@ -477,16 +500,23 @@
         </div>
         <div class="form-row-2" style="margin-bottom: 0;">
           <div class="form-group" style="margin-bottom: 0;">
+            <label class="field-label" for="amRole">Role Akun</label>
+            <select id="amRole" class="select">
+              <option value="admin">Admin</option>
+              <option value="master">Master (100% Akses)</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
             <label class="field-label" for="amJabatan">Jabatan / Divisi</label>
             <input id="amJabatan" class="input" type="text" placeholder="Koordinator Pengadaan Tanah" />
           </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label class="field-label" for="amPassword">Kata Sandi</label>
-            <input id="amPassword" class="input mono" type="text" minlength="6" required />
-          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="field-label" for="amPassword">Kata Sandi</label>
+          <input id="amPassword" class="input mono" type="text" minlength="6" required />
         </div>
         <label class="toggle-row" style="padding: 4px 0;">
-          <span>Status Akun Admin Aktif</span>
+          <span>Status Akun Aktif</span>
           <input id="amActive" type="checkbox" checked />
         </label>
         <div style="display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px;">
@@ -534,8 +564,8 @@
           <div class="form-group" style="margin-bottom: 0;">
             <label class="field-label" for="umRole">Role Operasional</label>
             <select id="umRole" class="select">
-              <option value="surveyor">Surveyor / Lapangan</option>
-              <option value="viewer">Viewer / Eksekutif</option>
+              <option value="staf_ahli">Staf Ahli (Kelola Data)</option>
+              <option value="user" selected>User / Pengguna (Lihat Data)</option>
             </select>
           </div>
         </div>
