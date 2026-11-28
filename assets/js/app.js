@@ -73,9 +73,11 @@
     ltParcelId: document.getElementById('ltParcelId'),
     ltParcelStatus: document.getElementById('ltParcelStatus'),
     ltParcelProgres: document.getElementById('ltParcelProgres'),
+    ltDownloadBadge: document.getElementById('ltDownloadBadge'),
     ltParcelOwner: document.getElementById('ltParcelOwner'),
     ltParcelMeta: document.getElementById('ltParcelMeta'),
     ltBtnZoom: document.getElementById('ltBtnZoom'),
+    ltBtnRequestAccess: document.getElementById('ltBtnRequestAccess'),
     ltBtnInspect: document.getElementById('ltBtnInspect'),
     ltBtnClose: document.getElementById('ltBtnClose'),
 
@@ -144,6 +146,7 @@
     editProgresNum: document.getElementById('editProgresNum'),
     editProgresText: document.getElementById('editProgresText'),
     editCatatan: document.getElementById('editCatatan'),
+    editDownloadPolicy: document.getElementById('editDownloadPolicy'),
 
     lockPemilik: document.getElementById('lockPemilik'),
     lockDesa: document.getElementById('lockDesa'),
@@ -151,6 +154,12 @@
     lockUgr: document.getElementById('lockUgr'),
     lockStatus: document.getElementById('lockStatus'),
     lockCatatan: document.getElementById('lockCatatan'),
+    lockDownloadPolicy: document.getElementById('lockDownloadPolicy'),
+
+    inspDownloadBox: document.getElementById('inspDownloadBox'),
+    inspDownloadStateBadge: document.getElementById('inspDownloadStateBadge'),
+    inspDownloadFormats: document.getElementById('inspDownloadFormats'),
+    btnInspRequestDownload: document.getElementById('btnInspRequestDownload'),
 
     inspectorActionRow: document.getElementById('inspectorActionRow'),
     btnSaveParcel: document.getElementById('btnSaveParcel'),
@@ -160,6 +169,7 @@
 
     importModal: document.getElementById('importModal'),
     btnCloseImport: document.getElementById('btnCloseImport'),
+    importDownloadPolicy: document.getElementById('importDownloadPolicy'),
     importDropzone: document.getElementById('importDropzone'),
     importFileInput: document.getElementById('importFileInput'),
     importFeedback: document.getElementById('importFeedback'),
@@ -171,8 +181,15 @@
     scopeAll: document.getElementById('scopeAll'),
     scopeFilteredCount: document.getElementById('scopeFilteredCount'),
     scopeAllCount: document.getElementById('scopeAllCount'),
+    exportAccessBox: document.getElementById('exportAccessBox'),
+    exportAccessSummary: document.getElementById('exportAccessSummary'),
+    exportRequestControls: document.getElementById('exportRequestControls'),
+    exportRequestNote: document.getElementById('exportRequestNote'),
+    btnRequestDownloadAccess: document.getElementById('btnRequestDownloadAccess'),
     btnExecExportGeojson: document.getElementById('btnExecExportGeojson'),
     btnExecExportExcel: document.getElementById('btnExecExportExcel'),
+    btnExecExportShp: document.getElementById('btnExecExportShp'),
+    btnExecExportCsv: document.getElementById('btnExecExportCsv'),
 
     toastStack: document.getElementById('toastStack')
   };
@@ -721,6 +738,10 @@
     el.parcelLowerThird.classList.remove('open', 'lt-animate');
   }
 
+  function getEffectiveSession() {
+    return { ...state.session, role: state.role };
+  }
+
   function showParcelLowerThird(parcel, retriggerAnim = true) {
     if (!parcel || !el.parcelLowerThird) {
       hideParcelLowerThird();
@@ -734,6 +755,23 @@
     el.ltParcelProgres.textContent = `${p.progres}%`;
     el.ltParcelOwner.textContent = p.nama_pemilik || 'Tanpa Nama';
     el.ltParcelMeta.textContent = `${p.desa || '-'} • ${formatNumberID(p.luas_m2)} m² (${formatNumberID((p.luas_m2 || 0) / 10000, 2)} Ha) • UGR ${formatCompactIDR(p.nilai_ugr)}`;
+
+    if (el.ltDownloadBadge && el.ltBtnRequestAccess) {
+      const info = LStore.getParcelDownloadAccessInfo(parcel, getEffectiveSession());
+      if (info.allowed) {
+        el.ltDownloadBadge.className = 'status-badge st-bebas';
+        el.ltDownloadBadge.textContent = info.reason === 'approved' ? 'Izin Disetujui' : 'Bisa Diunduh';
+        el.ltBtnRequestAccess.style.display = 'none';
+      } else if (info.reason === 'pending') {
+        el.ltDownloadBadge.className = 'status-badge st-nego';
+        el.ltDownloadBadge.textContent = 'Menunggu Persetujuan';
+        el.ltBtnRequestAccess.style.display = 'none';
+      } else {
+        el.ltDownloadBadge.className = 'status-badge st-sengketa';
+        el.ltDownloadBadge.textContent = info.reason === 'rejected' ? 'Izin Ditolak' : 'Perlu Izin Unduh';
+        el.ltBtnRequestAccess.style.display = 'inline-flex';
+      }
+    }
 
     el.parcelLowerThird.classList.add('open');
     if (retriggerAnim) {
@@ -813,8 +851,38 @@
     el.editProgresNum.value = p.progres;
     el.editProgresText.textContent = `${p.progres}%`;
     el.editCatatan.value = p.catatan;
+    if (el.editDownloadPolicy) {
+      el.editDownloadPolicy.value = LStore.normalizeDownloadPolicy(p.download_policy);
+    }
 
+    updateInspectorDownloadSection(parcel);
     applyRbacToInspectorFields();
+  }
+
+  function updateInspectorDownloadSection(parcel) {
+    if (!parcel || !el.inspDownloadBox) return;
+    const info = LStore.getParcelDownloadAccessInfo(parcel, getEffectiveSession());
+    if (info.allowed) {
+      el.inspDownloadStateBadge.className = 'status-badge st-bebas';
+      el.inspDownloadStateBadge.textContent = info.reason === 'approved' ? 'Izin Disetujui' : 'Akses Terbuka';
+      el.inspDownloadFormats.style.display = 'grid';
+      el.btnInspRequestDownload.style.display = 'none';
+    } else if (info.reason === 'pending') {
+      el.inspDownloadStateBadge.className = 'status-badge st-nego';
+      el.inspDownloadStateBadge.textContent = 'Menunggu Izin';
+      el.inspDownloadFormats.style.display = 'none';
+      el.btnInspRequestDownload.style.display = 'inline-flex';
+      el.btnInspRequestDownload.disabled = true;
+      el.btnInspRequestDownload.textContent = 'Menunggu Persetujuan Staf Ahli / Admin...';
+    } else {
+      el.inspDownloadStateBadge.className = 'status-badge st-sengketa';
+      el.inspDownloadStateBadge.textContent = info.reason === 'rejected' ? 'Izin Ditolak' : 'Butuh Izin';
+      el.inspDownloadFormats.style.display = 'none';
+      el.btnInspRequestDownload.style.display = 'inline-flex';
+      el.btnInspRequestDownload.disabled = false;
+      el.btnInspRequestDownload.innerHTML = '<i data-lucide="key-round" width="12" height="12"></i> Ajukan Izin Download Bidang Ini';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
   }
 
   function applyRbacToInspectorFields() {
@@ -824,11 +892,13 @@
     el.editDesa.disabled = !perm.canEditCore;
     el.editLuas.disabled = !perm.canEditCore;
     el.editUgr.disabled = !perm.canEditCore;
+    if (el.editDownloadPolicy) el.editDownloadPolicy.disabled = !perm.canEditCore;
 
     el.lockPemilik.style.display = perm.canEditCore ? 'none' : 'inline-flex';
     el.lockDesa.style.display = perm.canEditCore ? 'none' : 'inline-flex';
     el.lockLuas.style.display = perm.canEditCore ? 'none' : 'inline-flex';
     el.lockUgr.style.display = perm.canEditCore ? 'none' : 'inline-flex';
+    if (el.lockDownloadPolicy) el.lockDownloadPolicy.style.display = perm.canEditCore ? 'none' : 'inline-flex';
 
     el.editStatus.disabled = !perm.canEditField;
     el.editProgresRange.disabled = !perm.canEditField;
@@ -856,6 +926,9 @@
       if (Number.isFinite(newLuas) && newLuas > 0) p.luas_m2 = newLuas;
       const newUgr = parseInt(el.editUgr.value, 10);
       if (Number.isFinite(newUgr) && newUgr >= 0) p.nilai_ugr = newUgr;
+      if (el.editDownloadPolicy) {
+        p.download_policy = LStore.normalizeDownloadPolicy(el.editDownloadPolicy.value);
+      }
     }
 
     const newStatus = el.editStatus.value;
@@ -970,37 +1043,98 @@
     return state.exportScope === 'all' ? state.parcels : getFilteredParcels();
   }
 
+  function getDownloadableExportParcels() {
+    const eff = getEffectiveSession();
+    return getExportTargetParcels().filter(f => LStore.hasParcelDownloadAccess(f, eff));
+  }
+
   function updateExportScopeCounts() {
     el.scopeFilteredCount.textContent = `${getFilteredParcels().length} Persil`;
     el.scopeAllCount.textContent = `${state.parcels.length} Persil`;
-  }
 
-  function handleExportGeoJSON() {
-    const features = getExportTargetParcels();
-    if (!features.length) {
-      showToast('Tidak ada data persil untuk diexport.', 'warn');
-      return;
+    const targets = getExportTargetParcels();
+    const eff = getEffectiveSession();
+    const eligible = [];
+    const needsReq = [];
+    let pendingCount = 0;
+
+    targets.forEach(f => {
+      const info = LStore.getParcelDownloadAccessInfo(f, eff);
+      if (info.allowed) eligible.push(f);
+      else if (info.reason === 'pending') pendingCount++;
+      else needsReq.push(f);
+    });
+
+    const isRestrictedRole = !['master', 'admin', 'staf_ahli'].includes(eff.role);
+    if (el.exportAccessBox) {
+      if (isRestrictedRole && targets.length > 0) {
+        el.exportAccessBox.style.display = 'flex';
+        el.exportAccessSummary.innerHTML =
+          `<strong style="color:#34d399;">${eligible.length} persil</strong> dapat langsung diunduh` +
+          (pendingCount > 0 ? ` • <strong style="color:#fbbf24;">${pendingCount} persil</strong> menunggu persetujuan` : '') +
+          (needsReq.length > 0 ? ` • <strong style="color:#f87171;">${needsReq.length} persil</strong> memerlukan izin Staf Ahli / Admin` : '') + '.';
+        el.exportRequestControls.style.display = needsReq.length > 0 ? 'flex' : 'none';
+        el.btnRequestDownloadAccess.innerHTML = `<i data-lucide="key-round" width="12" height="12"></i> Ajukan Izin Download (${needsReq.length} Persil)`;
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      } else {
+        el.exportAccessBox.style.display = 'none';
+      }
     }
-    const suffix = state.exportScope === 'all' ? 'all' : 'filtered';
-    LStore.exportFeaturesToGeoJSON(features, suffix);
-    showToast(`Berhasil export ${features.length} persil ke GeoJSON.`, 'success');
-    addActivityLog(`Export GeoJSON (${features.length} persil).`);
-    el.exportModal.classList.remove('open');
+
+    const noEligible = eligible.length === 0;
+    [el.btnExecExportExcel, el.btnExecExportGeojson, el.btnExecExportShp, el.btnExecExportCsv].forEach(btn => {
+      if (btn) btn.disabled = noEligible;
+    });
   }
 
-  function handleExportExcel() {
-    const features = getExportTargetParcels();
-    if (!features.length) {
-      showToast('Tidak ada data persil untuk diexport.', 'warn');
-      return;
+  function runExportByFormat(features, format, scopeKey, scopeLabel) {
+    if (!features || !features.length) {
+      showToast('Tidak ada data persil yang berhak diunduh pada cakupan ini.', 'warn');
+      return false;
     }
     try {
-      const suffix = state.exportScope === 'all' ? 'all' : 'filtered';
-      const scopeLabel = state.exportScope === 'all' ? 'Seluruh Dataset' : 'Hasil Filter Aktif';
-      LStore.exportFeaturesToExcel(features, scopeLabel, RBAC_ROLES[state.role].label, suffix);
-      showToast(`Laporan Excel (${features.length} persil) berhasil diunduh.`, 'success');
-      addActivityLog(`Export Excel (${features.length} persil).`);
+      if (format === 'geojson') {
+        LStore.exportFeaturesToGeoJSON(features, scopeKey);
+      } else if (format === 'xlsx') {
+        LStore.exportFeaturesToExcel(features, scopeLabel, RBAC_ROLES[state.role].label, scopeKey);
+      } else if (format === 'shp') {
+        LStore.exportFeaturesToShapefile(features, scopeKey);
+      } else if (format === 'csv') {
+        LStore.exportFeaturesToCSV(features, scopeKey);
+      }
+      showToast(`Berhasil mengunduh ${features.length} persil (${format.toUpperCase()}).`, 'success');
+      addActivityLog(`Download ${format.toUpperCase()} (${features.length} persil).`);
+      return true;
+    } catch (err) {
+      showToast(err.message, 'error');
+      return false;
+    }
+  }
+
+  function handleExportFormat(format) {
+    const features = getDownloadableExportParcels();
+    const suffix = state.exportScope === 'all' ? 'all' : 'filtered';
+    const scopeLabel = state.exportScope === 'all' ? 'Seluruh Dataset' : 'Hasil Filter Aktif';
+    if (runExportByFormat(features, format, suffix, scopeLabel)) {
       el.exportModal.classList.remove('open');
+    }
+  }
+
+  async function requestSingleParcelDownload(parcelId) {
+    const parcel = state.parcels.find(f => f.properties.id_bidang === parcelId);
+    if (!parcel) return;
+    try {
+      await LStore.createDownloadRequest({
+        session: state.session,
+        parcelId: parcel.properties.id_bidang,
+        parcelOwner: parcel.properties.nama_pemilik,
+        formats: 'xlsx,geojson,shp,csv',
+        note: `Pengajuan izin unduh bidang ${parcel.properties.id_bidang}`
+      });
+      showToast(`Permintaan izin download ${parcel.properties.id_bidang} dikirim ke Staf Ahli / Admin.`, 'success');
+      await addActivityLog(`Ajukan izin download persil ${parcel.properties.id_bidang}.`);
+      showParcelLowerThird(parcel, false);
+      updateInspectorDownloadSection(parcel);
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -1022,7 +1156,11 @@
       if (file.name.toLowerCase().endsWith('.zip')) {
         setImportFeedback('Memproses arsip Shapefile (.zip)...');
       }
-      const result = await LStore.parseUploadedDatasetFile(file, state.parcels);
+      const selectedPolicy = el.importDownloadPolicy ? el.importDownloadPolicy.value : 'approval';
+      const result = await LStore.parseUploadedDatasetFile(file, state.parcels, {
+        defaultDownloadPolicy: selectedPolicy,
+        applyDownloadPolicyToUpdate: true
+      });
       if (result.mode === 'replace') {
         state.parcels = await LStore.replaceAllParcels(result.parcels, state.session.accountId);
       } else {
@@ -1374,6 +1512,33 @@
   el.editProgresRange.addEventListener('input', () => applyLiveParcelEdit('progresRange'));
   el.editProgresNum.addEventListener('input', () => applyLiveParcelEdit('progresNum'));
   el.editCatatan.addEventListener('input', () => applyLiveParcelEdit('catatan'));
+  if (el.editDownloadPolicy) {
+    el.editDownloadPolicy.addEventListener('change', () => applyLiveParcelEdit('download_policy'));
+  }
+  if (el.ltBtnRequestAccess) {
+    el.ltBtnRequestAccess.addEventListener('click', () => {
+      if (state.selectedId) requestSingleParcelDownload(state.selectedId);
+    });
+  }
+  if (el.btnInspRequestDownload) {
+    el.btnInspRequestDownload.addEventListener('click', () => {
+      if (state.selectedId) requestSingleParcelDownload(state.selectedId);
+    });
+  }
+  if (el.inspDownloadFormats) {
+    el.inspDownloadFormats.addEventListener('click', e => {
+      const btn = e.target.closest('.insp-dl-btn');
+      if (!btn || !state.selectedId) return;
+      const parcel = state.parcels.find(f => f.properties.id_bidang === state.selectedId);
+      if (!parcel) return;
+      if (!LStore.hasParcelDownloadAccess(parcel, getEffectiveSession())) {
+        showToast('Bidang ini memerlukan izin Staf Ahli / Admin sebelum diunduh.', 'warn');
+        return;
+      }
+      const fmt = btn.getAttribute('data-fmt');
+      runExportByFormat([parcel], fmt, parcel.properties.id_bidang, `Bidang ${parcel.properties.id_bidang}`);
+    });
+  }
 
   el.btnZoomSelected.addEventListener('click', () => {
     if (state.selectedId) zoomToParcel(state.selectedId);
@@ -1509,11 +1674,41 @@
       state.exportScope = card.getAttribute('data-scope');
       el.scopeFiltered.classList.toggle('active', state.exportScope === 'filtered');
       el.scopeAll.classList.toggle('active', state.exportScope === 'all');
+      updateExportScopeCounts();
     });
   });
 
-  el.btnExecExportGeojson.addEventListener('click', handleExportGeoJSON);
-  el.btnExecExportExcel.addEventListener('click', handleExportExcel);
+  if (el.btnRequestDownloadAccess) {
+    el.btnRequestDownloadAccess.addEventListener('click', async () => {
+      const targets = getExportTargetParcels();
+      const note = el.exportRequestNote ? el.exportRequestNote.value.trim() : '';
+      try {
+        const created = await LStore.createBulkDownloadRequests(state.session, targets, 'xlsx,geojson,shp,csv', note);
+        if (!created.length) {
+          showToast('Semua bidang terkunci sudah dalam antrean persetujuan.', 'info');
+        } else {
+          showToast(`Pengajuan izin untuk ${created.length} bidang dikirim ke Staf Ahli / Admin.`, 'success');
+          await addActivityLog(`Ajukan izin download (${created.length} bidang).`);
+        }
+        if (el.exportRequestNote) el.exportRequestNote.value = '';
+        updateExportScopeCounts();
+        if (state.selectedId) {
+          const activeParcel = state.parcels.find(f => f.properties.id_bidang === state.selectedId);
+          if (activeParcel) {
+            showParcelLowerThird(activeParcel, false);
+            updateInspectorDownloadSection(activeParcel);
+          }
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  el.btnExecExportGeojson.addEventListener('click', () => handleExportFormat('geojson'));
+  el.btnExecExportExcel.addEventListener('click', () => handleExportFormat('xlsx'));
+  el.btnExecExportShp.addEventListener('click', () => handleExportFormat('shp'));
+  el.btnExecExportCsv.addEventListener('click', () => handleExportFormat('csv'));
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {

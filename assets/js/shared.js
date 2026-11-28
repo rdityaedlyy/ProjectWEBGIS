@@ -15,7 +15,8 @@
     row: 'landacq_db_v2_row',
     project: 'landacq_db_v2_project',
     session: 'landacq_db_v2_session',
-    logs: 'landacq_db_v2_logs'
+    logs: 'landacq_db_v2_logs',
+    downloadRequests: 'landacq_db_v2_download_requests'
   };
 
   const STATUS_CONFIG = {
@@ -184,7 +185,8 @@
     parcels: null,
     rowFeatures: null,
     project: null,
-    logs: null
+    logs: null,
+    downloadRequests: null
   };
 
   const dbStatus = {
@@ -348,6 +350,14 @@
     };
   }
 
+  function normalizeDownloadPolicy(raw) {
+    const val = String(raw || '').trim().toLowerCase();
+    if (['open', 'public', 'allowed', 'langsung', 'terbuka', 'bebas', 'true', '1'].includes(val)) {
+      return 'open';
+    }
+    return 'approval';
+  }
+
   function parcelRowToFeature(row) {
     let geometry = null;
     try {
@@ -368,7 +378,8 @@
         nilai_ugr: Math.max(0, Number(row.nilai_ugr) || 0),
         status: normalizeStatus(row.status_akuisisi),
         progres: Math.max(0, Math.min(100, Number(row.persentase_progres) || 0)),
-        catatan: row.catatan_lapangan || '-'
+        catatan: row.catatan_lapangan || '-',
+        download_policy: normalizeDownloadPolicy(row.download_policy || 'approval')
       }
     };
   }
@@ -384,6 +395,7 @@
       status_akuisisi: normalizeStatus(p.status),
       persentase_progres: Math.max(0, Math.min(100, Math.round(Number(p.progres) || 0))),
       catatan_lapangan: String(p.catatan || '-'),
+      download_policy: normalizeDownloadPolicy(p.download_policy || 'approval'),
       geometry_geojson: JSON.stringify(feature.geometry),
       updated_by_account_id: updatedBy || null,
       updated_at: new Date().toISOString()
@@ -431,12 +443,13 @@
   // =========================================================================
   async function initDb() {
     try {
-      const [adminsRows, usersRows, parcelRows, projectRows, logRows] = await Promise.all([
+      const [adminsRows, usersRows, parcelRows, projectRows, logRows, dlReqRows] = await Promise.all([
         sbFetch('admins?select=*&order=id.asc'),
         sbFetch('users?select=*&order=id.asc'),
         sbFetch('parcels?select=*&order=id_bidang.asc'),
         sbFetch('project_settings?id=eq.1&select=*'),
-        sbFetch('audit_logs?select=*&order=id.desc&limit=100')
+        sbFetch('audit_logs?select=*&order=id.desc&limit=100'),
+        sbFetch('download_requests?select=*&order=id.desc&limit=200').catch(() => [])
       ]);
 
       if (Array.isArray(adminsRows) && adminsRows.length > 0) {
@@ -450,6 +463,7 @@
       memoryCache.project = project;
       memoryCache.rowFeatures = rowFeatures;
       memoryCache.logs = (logRows || []).map(logRowToModel);
+      memoryCache.downloadRequests = Array.isArray(dlReqRows) ? dlReqRows : [];
 
       // Mirror snapshot to localStorage cache
       writeStorageJson(STORAGE_KEYS.admins, memoryCache.admins);
@@ -458,6 +472,7 @@
       writeStorageJson(STORAGE_KEYS.project, memoryCache.project);
       writeStorageJson(STORAGE_KEYS.row, memoryCache.rowFeatures);
       writeStorageJson(STORAGE_KEYS.logs, memoryCache.logs);
+      writeStorageJson(STORAGE_KEYS.downloadRequests, memoryCache.downloadRequests);
 
       dbStatus.connected = true;
       dbStatus.mode = 'supabase';
@@ -476,6 +491,7 @@
       memoryCache.project = readStorageJson(STORAGE_KEYS.project, getDefaultProjectConfig);
       memoryCache.rowFeatures = readStorageJson(STORAGE_KEYS.row, () => []);
       memoryCache.logs = readStorageJson(STORAGE_KEYS.logs, () => []);
+      memoryCache.downloadRequests = readStorageJson(STORAGE_KEYS.downloadRequests, () => []);
       return false;
     }
   }
@@ -526,6 +542,11 @@
   function loadLogs() {
     if (Array.isArray(memoryCache.logs)) return memoryCache.logs;
     return readStorageJson(STORAGE_KEYS.logs, () => []);
+  }
+
+  function loadDownloadRequests() {
+    if (Array.isArray(memoryCache.downloadRequests)) return memoryCache.downloadRequests;
+    return readStorageJson(STORAGE_KEYS.downloadRequests, () => []);
   }
 
   // =========================================================================
@@ -890,6 +911,171 @@
   }
 
   // =========================================================================
+  // DOWNLOAD PERMISSION & REQUEST WORKFLOW
+  // =========================================================================
+  function getParcelDownloadAccessInfo(parcel, session) {
+    const p = (parcel && parcel.properties) || {};
+    const policy = normalizeDownloadPolicy(p.download_policy || 'approval');
+    if (!session) {
+      return { allowed: false, reason: 'no_session', policy, request: null };
+    }
+    const roleKey = normalizeAnyRole(session.role);
+    if (roleKey === 'master' || roleKey === 'admin' || roleKey === 'staf_ahli') {
+      return { allowed: true, reason: 'role', policy, request: null };
+    }
+    if (policy === 'open') {
+      return { allowed: true, reason: 'open', policy, request: null };
+    }
+    const idBidang = String(p.id_bidang || '').trim();
+    const reqs = loadDownloadRequests().filter(
+      r => String(r.requester_id) === String(session.accountId) && String(r.parcel_id) === idBidang
+    );
+    const approvedReq = reqs.find(r => r.status === 'approved');
+    if (approvedReq) {
+      return { allowed: true, reason: 'approved', policy, request: approvedReq };
+    }
+    const pendingReq = reqs.find(r => r.status === 'pending');
+    if (pendingReq) {
+      return { allowed: false, reason: 'pending', policy, request: pendingReq };
+    }
+    const rejectedReq = reqs[0] || null;
+    if (rejectedReq && rejectedReq.status === 'rejected') {
+      return { allowed: false, reason: 'rejected', policy, request: rejectedReq };
+    }
+    return { allowed: false, reason: 'needs_request', policy, request: null };
+  }
+
+  function hasParcelDownloadAccess(parcel, session) {
+    return getParcelDownloadAccessInfo(parcel, session).allowed;
+  }
+
+  async function createDownloadRequest({ session, parcelId, parcelOwner = '', formats = 'xlsx,geojson,shp,csv', note = '' }) {
+    if (!session || !session.accountId) {
+      throw new Error('Sesi pengguna tidak valid.');
+    }
+    const cleanParcelId = String(parcelId || '').trim();
+    if (!cleanParcelId) {
+      throw new Error('ID Bidang persil wajib diisi.');
+    }
+    const existing = loadDownloadRequests().find(
+      r => String(r.requester_id) === String(session.accountId) &&
+        String(r.parcel_id) === cleanParcelId &&
+        (r.status === 'pending' || r.status === 'approved')
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const row = {
+      requester_id: String(session.accountId),
+      requester_name: String(session.name || session.username || 'Pengguna'),
+      requester_username: String(session.username || session.accountId),
+      requester_role: normalizeAnyRole(session.originRole || session.role),
+      parcel_id: cleanParcelId,
+      parcel_owner: String(parcelOwner || '-'),
+      requested_formats: String(formats || 'xlsx,geojson,shp,csv'),
+      request_note: String(note || '').trim() || 'Permintaan akses unduh data persil.',
+      status: 'pending',
+      created_at: new Date().toISOString()
+    };
+
+    const list = loadDownloadRequests().slice();
+    let saved = { id: Date.now(), ...row };
+    try {
+      const inserted = await sbFetch('download_requests', {
+        method: 'POST',
+        prefer: 'return=representation',
+        body: row
+      });
+      if (Array.isArray(inserted) && inserted[0]) {
+        saved = inserted[0];
+      }
+    } catch (err) {
+      console.warn('Supabase download_requests insert fallback ke cache lokal:', err.message);
+    }
+    list.unshift(saved);
+    memoryCache.downloadRequests = list;
+    writeStorageJson(STORAGE_KEYS.downloadRequests, list);
+    return saved;
+  }
+
+  async function createBulkDownloadRequests(session, parcels, formats = 'xlsx,geojson,shp,csv', note = '') {
+    if (!session || !session.accountId) throw new Error('Sesi pengguna tidak valid.');
+    const targets = (parcels || []).filter(p => {
+      const info = getParcelDownloadAccessInfo(p, session);
+      return !info.allowed && info.reason !== 'pending';
+    });
+    if (!targets.length) return [];
+
+    const nowIso = new Date().toISOString();
+    const rows = targets.map(p => ({
+      requester_id: String(session.accountId),
+      requester_name: String(session.name || session.username || 'Pengguna'),
+      requester_username: String(session.username || session.accountId),
+      requester_role: normalizeAnyRole(session.originRole || session.role),
+      parcel_id: String(p.properties.id_bidang),
+      parcel_owner: String(p.properties.nama_pemilik || '-'),
+      requested_formats: String(formats || 'xlsx,geojson,shp,csv'),
+      request_note: String(note || '').trim() || 'Permintaan akses unduh dataset persil.',
+      status: 'pending',
+      created_at: nowIso
+    }));
+
+    let savedRows = rows.map((r, idx) => ({ id: Date.now() + idx, ...r }));
+    try {
+      const inserted = await sbFetch('download_requests', {
+        method: 'POST',
+        prefer: 'return=representation',
+        body: rows
+      });
+      if (Array.isArray(inserted) && inserted.length) {
+        savedRows = inserted;
+      }
+    } catch (err) {
+      console.warn('Supabase bulk download_requests fallback ke cache lokal:', err.message);
+    }
+
+    const list = [...savedRows.reverse(), ...loadDownloadRequests()];
+    memoryCache.downloadRequests = list;
+    writeStorageJson(STORAGE_KEYS.downloadRequests, list);
+    return savedRows;
+  }
+
+  async function reviewDownloadRequest(requestId, decision, reviewerSession, reviewNote = '') {
+    if (!reviewerSession) throw new Error('Sesi peninjau tidak valid.');
+    const roleKey = normalizeAnyRole(reviewerSession.role);
+    if (!['master', 'admin', 'staf_ahli'].includes(roleKey)) {
+      throw new Error('Hanya Staf Ahli, Admin, atau Master yang dapat menyetujui/menolak izin download.');
+    }
+    const status = decision === 'approved' ? 'approved' : 'rejected';
+    const patch = {
+      status,
+      reviewed_by_id: String(reviewerSession.accountId || ''),
+      reviewed_by_name: String(reviewerSession.name || reviewerSession.username || 'Petugas'),
+      reviewed_by_role: roleKey,
+      review_note: String(reviewNote || '').trim() || (status === 'approved' ? 'Disetujui' : 'Ditolak'),
+      reviewed_at: new Date().toISOString()
+    };
+
+    try {
+      await sbFetch(`download_requests?id=eq.${encodeURIComponent(requestId)}`, {
+        method: 'PATCH',
+        prefer: 'return=representation',
+        body: patch
+      });
+    } catch (err) {
+      console.warn('Supabase download_requests review fallback ke cache lokal:', err.message);
+    }
+
+    const list = loadDownloadRequests().map(r => (
+      String(r.id) === String(requestId) ? { ...r, ...patch } : r
+    ));
+    memoryCache.downloadRequests = list;
+    writeStorageJson(STORAGE_KEYS.downloadRequests, list);
+    return list.find(r => String(r.id) === String(requestId)) || null;
+  }
+
+  // =========================================================================
   // AUTHENTICATION & SESSION
   // =========================================================================
   function authenticateAccount(identifier, password) {
@@ -1176,7 +1362,7 @@
     return undefined;
   }
 
-  function normalizeImportedFeature(feature, idx, existingIds) {
+  function normalizeImportedFeature(feature, idx, existingIds, defaultDownloadPolicy = 'approval') {
     const p = feature.properties || {};
     let rawId = pickProp(p, ['id_bidang', 'id_persil', 'no_persil', 'parcel_id', 'id', 'fid', 'objectid']);
     let idBidang = rawId ? String(rawId).trim() : `PRS-${String(idx + 1).padStart(3, '0')}`;
@@ -1200,6 +1386,10 @@
     const progres = Number.isFinite(parsedProg) ? Math.max(0, Math.min(100, Math.round(parsedProg))) : defaultProg;
 
     const catatan = String(pickProp(p, ['catatan_lapangan', 'catatan', 'notes', 'note', 'keterangan']) || '-').trim();
+    const rawPolicy = pickProp(p, ['download_policy', 'akses_download', 'download_access']);
+    const downloadPolicy = rawPolicy !== undefined
+      ? normalizeDownloadPolicy(rawPolicy)
+      : normalizeDownloadPolicy(defaultDownloadPolicy);
 
     return {
       type: 'Feature',
@@ -1212,7 +1402,8 @@
         nilai_ugr: nilaiUgr,
         status,
         progres,
-        catatan
+        catatan,
+        download_policy: downloadPolicy
       }
     };
   }
@@ -1335,6 +1526,320 @@
     XLSX.writeFile(wb, `laporan_pembebasan_lahan_${scopeKey}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
+  function csvEscape(val) {
+    const str = String(val ?? '');
+    if (/[",\r\n]/.test(str)) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }
+
+  function exportFeaturesToCSV(features, scopeKey = 'all') {
+    const headers = [
+      'ID Bidang',
+      'Nama Pemilik',
+      'Desa/Kelurahan',
+      'Luas (m2)',
+      'Luas (Ha)',
+      'Nilai UGR (Rp)',
+      'Status Akuisisi',
+      'Progres (%)',
+      'Akses Download',
+      'Catatan Lapangan'
+    ];
+    const lines = [headers.map(csvEscape).join(',')];
+    features.forEach(f => {
+      const p = f.properties || {};
+      const luas = Number(p.luas_m2) || 0;
+      const akses = normalizeDownloadPolicy(p.download_policy) === 'open' ? 'Langsung' : 'Perlu Izin';
+      lines.push([
+        p.id_bidang,
+        p.nama_pemilik,
+        p.desa,
+        luas,
+        (luas / 10000).toFixed(4),
+        Number(p.nilai_ugr) || 0,
+        p.status,
+        Number(p.progres) || 0,
+        akses,
+        p.catatan
+      ].map(csvEscape).join(','));
+    });
+    const csvContent = `\uFEFF${lines.join('\r\n')}`;
+    triggerBlobDownload(
+      csvContent,
+      'text/csv;charset=utf-8',
+      `landacq_persil_${scopeKey}_${new Date().toISOString().slice(0, 10)}.csv`
+    );
+  }
+
+  function crc32Bytes(bytes) {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) {
+      crc ^= bytes[i];
+      for (let j = 0; j < 8; j++) {
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
+      }
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function buildStoredZip(entries) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+
+    entries.forEach(entry => {
+      const nameBytes = encoder.encode(entry.name);
+      const dataBytes = entry.data instanceof Uint8Array ? entry.data : encoder.encode(String(entry.data));
+      const crc = crc32Bytes(dataBytes);
+
+      const localHeader = new Uint8Array(30 + nameBytes.length);
+      const lv = new DataView(localHeader.buffer);
+      lv.setUint32(0, 0x04034B50, true);
+      lv.setUint16(4, 20, true);
+      lv.setUint16(6, 0x0800, true);
+      lv.setUint16(8, 0, true);
+      lv.setUint16(10, 0, true);
+      lv.setUint16(12, 0, true);
+      lv.setUint32(14, crc, true);
+      lv.setUint32(18, dataBytes.length, true);
+      lv.setUint32(22, dataBytes.length, true);
+      lv.setUint16(26, nameBytes.length, true);
+      lv.setUint16(28, 0, true);
+      localHeader.set(nameBytes, 30);
+
+      localParts.push(localHeader, dataBytes);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      const cv = new DataView(centralHeader.buffer);
+      cv.setUint32(0, 0x02014B50, true);
+      cv.setUint16(4, 20, true);
+      cv.setUint16(6, 20, true);
+      cv.setUint16(8, 0x0800, true);
+      cv.setUint16(10, 0, true);
+      cv.setUint16(12, 0, true);
+      cv.setUint16(14, 0, true);
+      cv.setUint32(16, crc, true);
+      cv.setUint32(20, dataBytes.length, true);
+      cv.setUint32(24, dataBytes.length, true);
+      cv.setUint16(28, nameBytes.length, true);
+      cv.setUint16(30, 0, true);
+      cv.setUint16(32, 0, true);
+      cv.setUint16(34, 0, true);
+      cv.setUint16(36, 0, true);
+      cv.setUint32(38, 0, true);
+      cv.setUint32(42, offset, true);
+      centralHeader.set(nameBytes, 46);
+
+      centralParts.push(centralHeader);
+      offset += localHeader.length + dataBytes.length;
+    });
+
+    const centralSize = centralParts.reduce((s, p) => s + p.length, 0);
+    const eocd = new Uint8Array(22);
+    const ev = new DataView(eocd.buffer);
+    ev.setUint32(0, 0x06054B50, true);
+    ev.setUint16(4, 0, true);
+    ev.setUint16(6, 0, true);
+    ev.setUint16(8, entries.length, true);
+    ev.setUint16(10, entries.length, true);
+    ev.setUint32(12, centralSize, true);
+    ev.setUint32(16, offset, true);
+    ev.setUint16(20, 0, true);
+
+    const totalSize = offset + centralSize + eocd.length;
+    const out = new Uint8Array(totalSize);
+    let pos = 0;
+    localParts.forEach(p => { out.set(p, pos); pos += p.length; });
+    centralParts.forEach(p => { out.set(p, pos); pos += p.length; });
+    out.set(eocd, pos);
+    return out;
+  }
+
+  function extractPolygonRings(geometry) {
+    if (!geometry) return [];
+    const rings = [];
+    const pushRing = ring => {
+      if (!Array.isArray(ring) || ring.length < 3) return;
+      const pts = ring.map(pt => [Number(pt[0]) || 0, Number(pt[1]) || 0]);
+      const first = pts[0];
+      const last = pts[pts.length - 1];
+      if (first[0] !== last[0] || first[1] !== last[1]) {
+        pts.push([first[0], first[1]]);
+      }
+      rings.push(pts);
+    };
+    if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates)) {
+      geometry.coordinates.forEach(pushRing);
+    } else if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+      geometry.coordinates.forEach(poly => {
+        if (Array.isArray(poly)) poly.forEach(pushRing);
+      });
+    }
+    return rings;
+  }
+
+  function writeAsciiFixed(target, offset, str, len) {
+    const clean = String(str ?? '').replace(/[^\x20-\x7E]/g, ' ');
+    for (let i = 0; i < len; i++) {
+      target[offset + i] = i < clean.length ? clean.charCodeAt(i) : 0x20;
+    }
+  }
+
+  function exportFeaturesToShapefile(features, scopeKey = 'all') {
+    const validFeatures = (features || []).filter(f => extractPolygonRings(f && f.geometry).length > 0);
+    if (!validFeatures.length) {
+      throw new Error('Tidak ada geometri poligon valid untuk diekspor ke Shapefile (.shp).');
+    }
+
+    let globalMinX = Infinity, globalMinY = Infinity, globalMaxX = -Infinity, globalMaxY = -Infinity;
+    const records = validFeatures.map((feat, idx) => {
+      const rings = extractPolygonRings(feat.geometry);
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let totalPoints = 0;
+      rings.forEach(r => {
+        totalPoints += r.length;
+        r.forEach(([x, y]) => {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        });
+      });
+      if (minX < globalMinX) globalMinX = minX;
+      if (minY < globalMinY) globalMinY = minY;
+      if (maxX > globalMaxX) globalMaxX = maxX;
+      if (maxY > globalMaxY) globalMaxY = maxY;
+      return { idx: idx + 1, rings, totalPoints, minX, minY, maxX, maxY, props: feat.properties || {} };
+    });
+
+    const shpContentBytes = records.reduce(
+      (sum, rec) => sum + 8 + 44 + (rec.rings.length * 4) + (rec.totalPoints * 16),
+      0
+    );
+    const shpBuf = new Uint8Array(100 + shpContentBytes);
+    const shpView = new DataView(shpBuf.buffer);
+
+    const writeShpHeader = (view, fileLenWords) => {
+      view.setInt32(0, 9994, false);
+      view.setInt32(24, fileLenWords, false);
+      view.setInt32(28, 1000, true);
+      view.setInt32(32, 5, true); // Polygon
+      view.setFloat64(36, globalMinX, true);
+      view.setFloat64(44, globalMinY, true);
+      view.setFloat64(52, globalMaxX, true);
+      view.setFloat64(60, globalMaxY, true);
+    };
+
+    writeShpHeader(shpView, shpBuf.length / 2);
+
+    const shxBuf = new Uint8Array(100 + records.length * 8);
+    const shxView = new DataView(shxBuf.buffer);
+    writeShpHeader(shxView, shxBuf.length / 2);
+
+    let shpOffset = 100;
+    records.forEach((rec, i) => {
+      const contentLenBytes = 44 + (rec.rings.length * 4) + (rec.totalPoints * 16);
+      const contentLenWords = contentLenBytes / 2;
+
+      shxView.setInt32(100 + i * 8, shpOffset / 2, false);
+      shxView.setInt32(100 + i * 8 + 4, contentLenWords, false);
+
+      shpView.setInt32(shpOffset, rec.idx, false);
+      shpView.setInt32(shpOffset + 4, contentLenWords, false);
+      let p = shpOffset + 8;
+      shpView.setInt32(p, 5, true); p += 4;
+      shpView.setFloat64(p, rec.minX, true); p += 8;
+      shpView.setFloat64(p, rec.minY, true); p += 8;
+      shpView.setFloat64(p, rec.maxX, true); p += 8;
+      shpView.setFloat64(p, rec.maxY, true); p += 8;
+      shpView.setInt32(p, rec.rings.length, true); p += 4;
+      shpView.setInt32(p, rec.totalPoints, true); p += 4;
+
+      let partStart = 0;
+      rec.rings.forEach(r => {
+        shpView.setInt32(p, partStart, true);
+        p += 4;
+        partStart += r.length;
+      });
+      rec.rings.forEach(r => {
+        r.forEach(([x, y]) => {
+          shpView.setFloat64(p, x, true);
+          shpView.setFloat64(p + 8, y, true);
+          p += 16;
+        });
+      });
+
+      shpOffset += 8 + contentLenBytes;
+    });
+
+    // Build dBASE III (.dbf)
+    const fields = [
+      { name: 'ID_BIDANG', type: 'C', len: 24, dec: 0, get: pr => pr.id_bidang },
+      { name: 'PEMILIK', type: 'C', len: 50, dec: 0, get: pr => pr.nama_pemilik },
+      { name: 'DESA', type: 'C', len: 40, dec: 0, get: pr => pr.desa },
+      { name: 'LUAS_M2', type: 'N', len: 14, dec: 2, get: pr => Number(pr.luas_m2 || 0).toFixed(2) },
+      { name: 'NILAI_UGR', type: 'N', len: 18, dec: 0, get: pr => String(Math.round(Number(pr.nilai_ugr || 0))) },
+      { name: 'STATUS', type: 'C', len: 30, dec: 0, get: pr => pr.status },
+      { name: 'PROGRES', type: 'N', len: 5, dec: 0, get: pr => String(Math.round(Number(pr.progres || 0))) },
+      { name: 'AKSES_DL', type: 'C', len: 16, dec: 0, get: pr => normalizeDownloadPolicy(pr.download_policy) === 'open' ? 'Langsung' : 'Perlu Izin' },
+      { name: 'CATATAN', type: 'C', len: 80, dec: 0, get: pr => pr.catatan }
+    ];
+    const headerLen = 32 + fields.length * 32 + 1;
+    const recordLen = 1 + fields.reduce((s, f) => s + f.len, 0);
+    const dbfBuf = new Uint8Array(headerLen + records.length * recordLen + 1);
+    const dbfView = new DataView(dbfBuf.buffer);
+    const now = new Date();
+    dbfBuf[0] = 3;
+    dbfBuf[1] = now.getFullYear() - 1900;
+    dbfBuf[2] = now.getMonth() + 1;
+    dbfBuf[3] = now.getDate();
+    dbfView.setUint32(4, records.length, true);
+    dbfView.setUint16(8, headerLen, true);
+    dbfView.setUint16(10, recordLen, true);
+
+    fields.forEach((f, idx) => {
+      const off = 32 + idx * 32;
+      for (let c = 0; c < 11; c++) {
+        dbfBuf[off + c] = c < f.name.length ? f.name.charCodeAt(c) : 0;
+      }
+      dbfBuf[off + 11] = f.type.charCodeAt(0);
+      dbfBuf[off + 16] = f.len;
+      dbfBuf[off + 17] = f.dec;
+    });
+    dbfBuf[headerLen - 1] = 0x0D;
+
+    records.forEach((rec, rIdx) => {
+      let pos = headerLen + rIdx * recordLen;
+      dbfBuf[pos] = 0x20;
+      pos += 1;
+      fields.forEach(f => {
+        const val = String(f.get(rec.props) ?? '');
+        if (f.type === 'N') {
+          const padded = val.slice(0, f.len).padStart(f.len, ' ');
+          writeAsciiFixed(dbfBuf, pos, padded, f.len);
+        } else {
+          writeAsciiFixed(dbfBuf, pos, val.slice(0, f.len), f.len);
+        }
+        pos += f.len;
+      });
+    });
+    dbfBuf[dbfBuf.length - 1] = 0x1A;
+
+    const prjText = 'GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]';
+    const baseName = `landacq_persil_${scopeKey}_${now.toISOString().slice(0, 10)}`;
+    const zipBytes = buildStoredZip([
+      { name: `${baseName}.shp`, data: shpBuf },
+      { name: `${baseName}.shx`, data: shxBuf },
+      { name: `${baseName}.dbf`, data: dbfBuf },
+      { name: `${baseName}.prj`, data: prjText }
+    ]);
+
+    triggerBlobDownload(zipBytes, 'application/zip', `${baseName}_shp.zip`);
+  }
+
   function downloadExcelTemplate(parcels) {
     if (typeof XLSX === 'undefined') {
       throw new Error('Library SheetJS (XLSX) belum termuat.');
@@ -1367,9 +1872,10 @@
     XLSX.writeFile(wb, 'template_update_persil_landacq.xlsx');
   }
 
-  async function parseUploadedDatasetFile(file, existingParcels) {
+  async function parseUploadedDatasetFile(file, existingParcels, options = {}) {
     if (!file) throw new Error('Tidak ada file dipilih.');
     const name = file.name.toLowerCase();
+    const defaultPolicy = normalizeDownloadPolicy(options.defaultDownloadPolicy || 'approval');
 
     if (name.endsWith('.geojson') || name.endsWith('.json')) {
       const text = await file.text();
@@ -1392,7 +1898,7 @@
       return {
         mode: 'replace',
         sourceLabel: 'GeoJSON',
-        parcels: polyFeatures.map((feat, i) => normalizeImportedFeature(feat, i, usedIds))
+        parcels: polyFeatures.map((feat, i) => normalizeImportedFeature(feat, i, usedIds, defaultPolicy))
       };
     }
 
@@ -1420,7 +1926,7 @@
       return {
         mode: 'replace',
         sourceLabel: 'Shapefile (.zip)',
-        parcels: polyFeatures.map((feat, i) => normalizeImportedFeature(feat, i, usedIds))
+        parcels: polyFeatures.map((feat, i) => normalizeImportedFeature(feat, i, usedIds, defaultPolicy))
       };
     }
 
@@ -1481,6 +1987,12 @@
         if (statusRaw !== undefined) p.status = normalizeStatus(statusRaw);
         if (Number.isFinite(progRaw)) p.progres = Math.max(0, Math.min(100, Math.round(progRaw)));
         if (catatan !== undefined) p.catatan = String(catatan).trim();
+        if (options.applyDownloadPolicyToUpdate) {
+          p.download_policy = defaultPolicy;
+        } else {
+          const rawPol = pickProp(row, ['download_policy', 'akses_download', 'download_access']);
+          if (rawPol !== undefined) p.download_policy = normalizeDownloadPolicy(rawPol);
+        }
 
         changedFeatures.push(parcel);
         updatedCount++;
@@ -1807,10 +2319,17 @@
     loadRowFeatures,
     loadProjectConfig,
     loadLogs,
+    loadDownloadRequests,
     saveProjectConfig,
     saveRowFeatures,
     pushLog,
     clearLogs,
+    normalizeDownloadPolicy,
+    getParcelDownloadAccessInfo,
+    hasParcelDownloadAccess,
+    createDownloadRequest,
+    createBulkDownloadRequests,
+    reviewDownloadRequest,
     isIdentifierTaken,
     createAdminRecord,
     updateAdminRecord,
@@ -1846,6 +2365,8 @@
     showToast,
     exportFeaturesToGeoJSON,
     exportFeaturesToExcel,
+    exportFeaturesToCSV,
+    exportFeaturesToShapefile,
     downloadExcelTemplate,
     parseUploadedDatasetFile,
     parseUploadedRowFile,

@@ -24,6 +24,7 @@
     rowFeatures: [],
     project: LStore.loadProjectConfig(),
     logs: [],
+    downloadRequests: [],
     activeTab: 'accounts',
     selectedParcelIds: new Set(),
     editingAdminId: null,
@@ -39,6 +40,8 @@
       parcelSearch: '',
       parcelStatus: 'ALL',
       parcelDesa: 'ALL',
+      dlReqSearch: '',
+      dlReqStatus: 'pending',
       logType: 'ALL',
       logSearch: ''
     }
@@ -63,6 +66,8 @@
     tabParcelCount: document.getElementById('tabParcelCount'),
     tabBtnProject: document.getElementById('tabBtnProject'),
     tabProjectLabel: document.getElementById('tabProjectLabel'),
+    tabBtnDownloadRequests: document.getElementById('tabBtnDownloadRequests'),
+    tabDlReqCount: document.getElementById('tabDlReqCount'),
     tabBtnLogs: document.getElementById('tabBtnLogs'),
     tabLogCount: document.getElementById('tabLogCount'),
 
@@ -107,6 +112,8 @@
     bulkSelectedCount: document.getElementById('bulkSelectedCount'),
     bulkStatusSelect: document.getElementById('bulkStatusSelect'),
     btnBulkApplyStatus: document.getElementById('btnBulkApplyStatus'),
+    bulkDownloadPolicySelect: document.getElementById('bulkDownloadPolicySelect'),
+    btnBulkApplyPolicy: document.getElementById('btnBulkApplyPolicy'),
     btnBulkDelete: document.getElementById('btnBulkDelete'),
     chkAllParcels: document.getElementById('chkAllParcels'),
     admParcelTableBody: document.getElementById('admParcelTableBody'),
@@ -122,6 +129,7 @@
     cfgCenterLat: document.getElementById('cfgCenterLat'),
     cfgCenterLng: document.getElementById('cfgCenterLng'),
 
+    admImportDownloadPolicy: document.getElementById('admImportDownloadPolicy'),
     admImportDropzone: document.getElementById('admImportDropzone'),
     admImportFileInput: document.getElementById('admImportFileInput'),
     admImportFeedback: document.getElementById('admImportFeedback'),
@@ -131,12 +139,19 @@
     admRowFileInput: document.getElementById('admRowFileInput'),
     admBtnExportGeojson: document.getElementById('admBtnExportGeojson'),
     admBtnExportExcel: document.getElementById('admBtnExportExcel'),
+    admBtnExportShp: document.getElementById('admBtnExportShp'),
+    admBtnExportCsv: document.getElementById('admBtnExportCsv'),
     admBtnTemplateXlsx: document.getElementById('admBtnTemplateXlsx'),
     admDbToolsBox: document.getElementById('admDbToolsBox'),
     admBtnBackupDb: document.getElementById('admBtnBackupDb'),
     admBtnRestoreDb: document.getElementById('admBtnRestoreDb'),
     admBtnClearData: document.getElementById('admBtnClearData'),
     admRestoreFileInput: document.getElementById('admRestoreFileInput'),
+
+    admDlReqSearch: document.getElementById('admDlReqSearch'),
+    admDlReqFilter: document.getElementById('admDlReqFilter'),
+    btnApproveAllDlReqs: document.getElementById('btnApproveAllDlReqs'),
+    admDlReqTableBody: document.getElementById('admDlReqTableBody'),
 
     admLogSearch: document.getElementById('admLogSearch'),
     admLogFilter: document.getElementById('admLogFilter'),
@@ -181,6 +196,7 @@
     pmUgr: document.getElementById('pmUgr'),
     pmStatus: document.getElementById('pmStatus'),
     pmProgres: document.getElementById('pmProgres'),
+    pmDownloadPolicy: document.getElementById('pmDownloadPolicy'),
     btnGenRectPoly: document.getElementById('btnGenRectPoly'),
     rectHelperBox: document.getElementById('rectHelperBox'),
     rhLat: document.getElementById('rhLat'),
@@ -221,6 +237,7 @@
     if (perm.canManageAccounts || perm.canViewUserEmails) allowed.push('accounts');
     if (perm.canEditCore) allowed.push('parcels');
     if (perm.canManageProject || perm.canImport) allowed.push('project');
+    if (perm.canEditCore || perm.canEditField) allowed.push('download_requests');
     if (perm.canViewLogs) allowed.push('logs');
     return allowed;
   }
@@ -237,6 +254,7 @@
     document.getElementById('panelAccounts').classList.toggle('active', nextTab === 'accounts');
     document.getElementById('panelParcels').classList.toggle('active', nextTab === 'parcels');
     document.getElementById('panelProject').classList.toggle('active', nextTab === 'project');
+    document.getElementById('panelDownloadRequests').classList.toggle('active', nextTab === 'download_requests');
     document.getElementById('panelLogs').classList.toggle('active', nextTab === 'logs');
   }
 
@@ -268,11 +286,13 @@
     const showAccounts = Boolean(perm.canManageAccounts || perm.canViewUserEmails);
     const showParcels = Boolean(perm.canEditCore);
     const showProject = Boolean(perm.canManageProject || perm.canImport);
+    const showDlReqs = Boolean(perm.canEditCore || perm.canEditField);
     const showLogs = Boolean(perm.canViewLogs);
 
     el.tabBtnAccounts.style.display = showAccounts ? 'inline-flex' : 'none';
     el.tabBtnParcels.style.display = showParcels ? 'inline-flex' : 'none';
     el.tabBtnProject.style.display = showProject ? 'inline-flex' : 'none';
+    el.tabBtnDownloadRequests.style.display = showDlReqs ? 'inline-flex' : 'none';
     el.tabBtnLogs.style.display = showLogs ? 'inline-flex' : 'none';
 
     el.tabAccountLabel.textContent = perm.canManageAccounts ? 'Kategori Admin & User' : 'Daftar Staf & User';
@@ -771,7 +791,7 @@
         ? 'Tabel <span class="mono">parcels</span> masih kosong (tanpa data dummy). Klik <strong>Tambah Persil Manual</strong> atau import GeoJSON/SHP.'
         : 'Tidak ada data persil yang sesuai dengan filter.';
       el.admParcelTableBody.innerHTML = `
-        <tr><td colspan="10" style="text-align:center; padding: 24px; color: var(--text-muted);">${emptyText}</td></tr>
+        <tr><td colspan="11" style="text-align:center; padding: 24px; color: var(--text-muted);">${emptyText}</td></tr>
       `;
       syncBulkBar();
       return;
@@ -781,6 +801,7 @@
       const p = f.properties;
       const cfg = STATUS_CONFIG[p.status] || STATUS_CONFIG['Belum Diproses'];
       const checked = state.selectedParcelIds.has(p.id_bidang) ? 'checked' : '';
+      const isOpenDl = LStore.normalizeDownloadPolicy(p.download_policy) === 'open';
       return `
         <tr data-id="${escapeHtml(p.id_bidang)}">
           <td style="text-align: center;">
@@ -798,6 +819,11 @@
             </span>
           </td>
           <td class="mono">${p.progres}%</td>
+          <td>
+            <button type="button" class="btn btn-sm btn-toggle-dl-policy" data-id="${escapeHtml(p.id_bidang)}" style="height:24px; font-size:10.5px; border-color:${isOpenDl ? 'rgba(16,185,129,0.55)' : 'rgba(245,158,11,0.55)'}; color:${isOpenDl ? '#34d399' : '#fbbf24'};" title="Klik untuk ubah izin download pengguna">
+              ${isOpenDl ? 'Langsung Unduh' : 'Menunggu Izin'}
+            </button>
+          </td>
           <td style="color: var(--text-secondary);" title="${escapeHtml(p.catatan)}">${escapeHtml(p.catatan)}</td>
           <td style="text-align: right;">
             <div style="display: inline-flex; gap: 5px;">
@@ -843,6 +869,7 @@
       el.pmUgr.value = p.nilai_ugr;
       el.pmStatus.value = p.status;
       el.pmProgres.value = p.progres;
+      el.pmDownloadPolicy.value = LStore.normalizeDownloadPolicy(p.download_policy);
       el.pmCoords.value = geometryToLatLngText(feat.geometry);
       el.pmCatatan.value = p.catatan;
     } else {
@@ -855,6 +882,7 @@
       el.pmUgr.value = 0;
       el.pmStatus.value = 'Belum Diproses';
       el.pmProgres.value = 0;
+      el.pmDownloadPolicy.value = 'approval';
       el.pmCoords.value = '';
       el.pmCatatan.value = '';
     }
@@ -880,6 +908,7 @@
     const ugr = Math.max(0, parseInt(el.pmUgr.value, 10) || 0);
     const status = el.pmStatus.value;
     const progres = Math.max(0, Math.min(100, parseInt(el.pmProgres.value, 10) || 0));
+    const downloadPolicy = LStore.normalizeDownloadPolicy(el.pmDownloadPolicy.value);
     const catatan = el.pmCatatan.value.trim() || '-';
 
     try {
@@ -897,12 +926,13 @@
             nilai_ugr: ugr,
             status,
             progres,
+            download_policy: downloadPolicy,
             catatan
           }
         };
         await LStore.upsertParcel(updatedFeat, state.session.accountId);
         state.parcels = LStore.loadParcels();
-        await logAction(`Edit persil ${existing.properties.id_bidang} (${status}).`, 'parcels');
+        await logAction(`Edit persil ${existing.properties.id_bidang} (${status}, akses: ${downloadPolicy}).`, 'parcels');
         showToast(`Persil ${existing.properties.id_bidang} berhasil diperbarui di Supabase.`, 'success');
       } else {
         if (state.parcels.some(f => f.properties.id_bidang.toUpperCase() === idVal.toUpperCase())) {
@@ -920,6 +950,7 @@
             nilai_ugr: ugr,
             status,
             progres,
+            download_policy: downloadPolicy,
             catatan
           }
         };
@@ -955,7 +986,11 @@
   async function handleAdminImportFile(file) {
     if (!file) return;
     try {
-      const result = await LStore.parseUploadedDatasetFile(file, state.parcels);
+      const selectedPolicy = el.admImportDownloadPolicy ? el.admImportDownloadPolicy.value : 'approval';
+      const result = await LStore.parseUploadedDatasetFile(file, state.parcels, {
+        defaultDownloadPolicy: selectedPolicy,
+        applyDownloadPolicyToUpdate: true
+      });
       if (result.mode === 'replace') {
         state.parcels = await LStore.replaceAllParcels(result.parcels, state.session.accountId);
       } else {
@@ -1027,6 +1062,68 @@
         <td>${escapeHtml(item.text)}</td>
       </tr>
     `).join('');
+  }
+
+  // =========================================================================
+  // TAB 5: ANTREAN IZIN DOWNLOAD
+  // =========================================================================
+  function renderDownloadRequestsTable() {
+    const list = state.downloadRequests || [];
+    const pendingCount = list.filter(r => r.status === 'pending').length;
+    el.tabDlReqCount.textContent = pendingCount;
+
+    const q = state.filters.dlReqSearch.trim().toLowerCase();
+    const stFilter = state.filters.dlReqStatus;
+    const filtered = list.filter(r => {
+      if (stFilter !== 'ALL' && r.status !== stFilter) return false;
+      if (q && !`${r.requester_name} ${r.requester_username} ${r.parcel_id} ${r.parcel_owner} ${r.request_note}`.toLowerCase().includes(q)) {
+        return false;
+      }
+      return true;
+    });
+
+    if (!filtered.length) {
+      el.admDlReqTableBody.innerHTML = `
+        <tr><td colspan="8" style="text-align:center; padding: 22px; color: var(--text-muted);">Belum ada permintaan izin download untuk filter ini.</td></tr>
+      `;
+      return;
+    }
+
+    el.admDlReqTableBody.innerHTML = filtered.map(r => {
+      const stBadge = r.status === 'approved'
+        ? '<span class="status-badge st-bebas">Disetujui</span>'
+        : r.status === 'rejected'
+          ? '<span class="status-badge st-sengketa">Ditolak</span>'
+          : '<span class="status-badge st-nego">Menunggu Izin</span>';
+      const createdTxt = formatShortDate(r.created_at);
+      const reviewerTxt = r.reviewed_by_name
+        ? `${escapeHtml(r.reviewed_by_name)} (${escapeHtml(r.reviewed_by_role || '')})`
+        : '<span style="color:var(--text-muted);">-</span>';
+
+      return `
+        <tr>
+          <td class="mono" style="color:var(--text-muted);">${escapeHtml(createdTxt)}</td>
+          <td>
+            <div style="font-weight:600;">${escapeHtml(r.requester_name)}</div>
+            <div class="mono" style="font-size:10.5px; color:var(--text-secondary);">@${escapeHtml(r.requester_username)}</div>
+          </td>
+          <td>
+            <div class="mono" style="font-weight:700; color:#67e8f9;">${escapeHtml(r.parcel_id)}</div>
+            <div style="font-size:11px; color:var(--text-secondary);">${escapeHtml(r.parcel_owner || '-')}</div>
+          </td>
+          <td class="mono" style="font-size:10.5px;">${escapeHtml(String(r.requested_formats || 'xlsx,geojson,shp,csv').toUpperCase())}</td>
+          <td style="color:var(--text-secondary);">${escapeHtml(r.request_note || '-')}</td>
+          <td>${stBadge}</td>
+          <td style="font-size:11px;">${reviewerTxt}</td>
+          <td style="text-align:right;">
+            <div style="display:inline-flex; gap:5px;">
+              ${r.status !== 'approved' ? `<button type="button" class="btn btn-success btn-sm btn-approve-dlreq" data-id="${escapeHtml(r.id)}" style="height:24px;">Setujui</button>` : ''}
+              ${r.status !== 'rejected' ? `<button type="button" class="btn btn-danger btn-sm btn-reject-dlreq" data-id="${escapeHtml(r.id)}" style="height:24px;">Tolak</button>` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
 
   // =========================================================================
@@ -1265,6 +1362,28 @@
   });
 
   el.admParcelTableBody.addEventListener('click', async e => {
+    const toggleDlBtn = e.target.closest('.btn-toggle-dl-policy');
+    if (toggleDlBtn) {
+      const id = toggleDlBtn.getAttribute('data-id');
+      const feat = state.parcels.find(f => f.properties.id_bidang === id);
+      if (!feat) return;
+      const curPolicy = LStore.normalizeDownloadPolicy(feat.properties.download_policy);
+      const nextPolicy = curPolicy === 'open' ? 'approval' : 'open';
+      try {
+        const updated = {
+          ...feat,
+          properties: { ...feat.properties, download_policy: nextPolicy }
+        };
+        await LStore.upsertParcel(updated, state.session.accountId);
+        state.parcels = LStore.loadParcels();
+        renderParcelTable();
+        await logAction(`Ubah akses download persil ${id} -> ${nextPolicy}.`, 'parcels');
+        showToast(`Izin download ${id}: ${nextPolicy === 'open' ? 'Langsung Bisa Didownload' : 'Menunggu Izin'}.`, 'success');
+      } catch (err) {
+        showToast(`Gagal mengubah izin download: ${err.message}`, 'error');
+      }
+      return;
+    }
     const editBtn = e.target.closest('.btn-edit-parcel');
     if (editBtn) {
       openParcelModal(editBtn.getAttribute('data-id'));
@@ -1312,6 +1431,29 @@
       showToast(`${count} persil diubah menjadi ${targetStatus} di Supabase.`, 'success');
     } catch (err) {
       showToast(`Gagal bulk update: ${err.message}`, 'error');
+    }
+  });
+
+  el.btnBulkApplyPolicy.addEventListener('click', async () => {
+    if (!state.selectedParcelIds.size) return;
+    const targetPolicy = LStore.normalizeDownloadPolicy(el.bulkDownloadPolicySelect.value);
+    let count = 0;
+    const nextParcels = state.parcels.map(f => {
+      if (!state.selectedParcelIds.has(f.properties.id_bidang)) return f;
+      count++;
+      return {
+        ...f,
+        properties: { ...f.properties, download_policy: targetPolicy }
+      };
+    });
+    try {
+      state.parcels = await LStore.upsertManyParcels(nextParcels, state.session.accountId);
+      state.selectedParcelIds.clear();
+      renderParcelTable();
+      await logAction(`Bulk update akses download ${count} persil -> ${targetPolicy}.`, 'parcels');
+      showToast(`${count} persil diatur ke: ${targetPolicy === 'open' ? 'Langsung Bisa Didownload' : 'Menunggu Izin'}.`, 'success');
+    } catch (err) {
+      showToast(`Gagal update izin download massal: ${err.message}`, 'error');
     }
   });
 
@@ -1455,6 +1597,80 @@
     }
   });
 
+  el.admBtnExportShp.addEventListener('click', () => {
+    if (!state.parcels.length) {
+      showToast('Tabel parcels masih kosong.', 'warn');
+      return;
+    }
+    try {
+      LStore.exportFeaturesToShapefile(state.parcels, 'all');
+      logAction(`Export Shapefile (${state.parcels.length} persil).`, 'parcels');
+      showToast('Shapefile (.shp/.zip) berhasil diunduh.', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  el.admBtnExportCsv.addEventListener('click', () => {
+    if (!state.parcels.length) {
+      showToast('Tabel parcels masih kosong.', 'warn');
+      return;
+    }
+    try {
+      LStore.exportFeaturesToCSV(state.parcels, 'all');
+      logAction(`Export CSV (${state.parcels.length} persil).`, 'parcels');
+      showToast('Data CSV (.csv) berhasil diunduh.', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  el.admDlReqSearch.addEventListener('input', () => {
+    state.filters.dlReqSearch = el.admDlReqSearch.value;
+    renderDownloadRequestsTable();
+  });
+
+  el.admDlReqFilter.addEventListener('change', () => {
+    state.filters.dlReqStatus = el.admDlReqFilter.value;
+    renderDownloadRequestsTable();
+  });
+
+  el.admDlReqTableBody.addEventListener('click', async e => {
+    const appBtn = e.target.closest('.btn-approve-dlreq');
+    const rejBtn = e.target.closest('.btn-reject-dlreq');
+    if (!appBtn && !rejBtn) return;
+    const reqId = (appBtn || rejBtn).getAttribute('data-id');
+    const decision = appBtn ? 'approved' : 'rejected';
+    try {
+      const updated = await LStore.reviewDownloadRequest(reqId, decision, state.session);
+      state.downloadRequests = LStore.loadDownloadRequests();
+      renderDownloadRequestsTable();
+      await logAction(`${decision === 'approved' ? 'Setujui' : 'Tolak'} izin download persil ${updated ? updated.parcel_id : reqId}.`, 'download_requests');
+      showToast(`Permintaan izin download ${decision === 'approved' ? 'disetujui' : 'ditolak'}.`, decision === 'approved' ? 'success' : 'warn');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  el.btnApproveAllDlReqs.addEventListener('click', async () => {
+    const pendings = (state.downloadRequests || []).filter(r => r.status === 'pending');
+    if (!pendings.length) {
+      showToast('Tidak ada permintaan izin yang menunggu persetujuan.', 'info');
+      return;
+    }
+    try {
+      for (const req of pendings) {
+        await LStore.reviewDownloadRequest(req.id, 'approved', state.session, 'Disetujui massal');
+      }
+      state.downloadRequests = LStore.loadDownloadRequests();
+      renderDownloadRequestsTable();
+      await logAction(`Setujui massal ${pendings.length} permintaan izin download.`, 'download_requests');
+      showToast(`${pendings.length} permintaan izin download disetujui.`, 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
   el.admBtnTemplateXlsx.addEventListener('click', () => {
     try {
       LStore.downloadExcelTemplate(state.parcels);
@@ -1572,6 +1788,7 @@
     state.rowFeatures = LStore.loadRowFeatures();
     state.project = LStore.loadProjectConfig();
     state.logs = LStore.loadLogs();
+    state.downloadRequests = LStore.loadDownloadRequests();
 
     applyRbacGuard();
     refreshDesaFilterOptions();
@@ -1580,6 +1797,7 @@
     renderUserTable();
     renderParcelTable();
     renderProjectForm();
+    renderDownloadRequestsTable();
     renderLogsTable();
 
     LStore.bindChangePasswordUI({

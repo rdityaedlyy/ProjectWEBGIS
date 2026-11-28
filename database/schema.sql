@@ -75,6 +75,18 @@ BEGIN
     ALTER TABLE public.users ALTER COLUMN role SET DEFAULT 'user';
     ALTER TABLE public.users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'viewer'));
   END IF;
+
+  -- Tambahkan kolom kontrol akses download per bidang pada tabel parcels
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'parcels') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'parcels' AND column_name = 'download_policy'
+    ) THEN
+      ALTER TABLE public.parcels ADD COLUMN download_policy VARCHAR(24) NOT NULL DEFAULT 'approval';
+    END IF;
+    ALTER TABLE public.parcels DROP CONSTRAINT IF EXISTS parcels_download_policy_check;
+    ALTER TABLE public.parcels ADD CONSTRAINT parcels_download_policy_check CHECK (download_policy IN ('open', 'approval'));
+  END IF;
 END $$;
 
 -- 3. Tabel Bidang Tanah / Persil Akuisisi Lahan
@@ -94,6 +106,7 @@ CREATE TABLE IF NOT EXISTS parcels (
     )),
   persentase_progres SMALLINT NOT NULL DEFAULT 0 CHECK (persentase_progres BETWEEN 0 AND 100),
   catatan_lapangan TEXT,
+  download_policy VARCHAR(24) NOT NULL DEFAULT 'approval' CHECK (download_policy IN ('open', 'approval')),
   geometry_geojson TEXT NOT NULL,
   updated_by_account_id VARCHAR(20) NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -126,10 +139,33 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 6. Tabel Permintaan Izin Download Data Persil (persetujuan oleh Staf Ahli / Admin / Master)
+CREATE TABLE IF NOT EXISTS download_requests (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  requester_id VARCHAR(20) NOT NULL,
+  requester_name VARCHAR(120) NOT NULL,
+  requester_username VARCHAR(80) NOT NULL,
+  requester_role VARCHAR(20) NOT NULL DEFAULT 'user',
+  parcel_id VARCHAR(32) NOT NULL,
+  parcel_owner VARCHAR(150) NULL,
+  requested_formats VARCHAR(80) NOT NULL DEFAULT 'xlsx,geojson,shp,csv',
+  request_note TEXT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  reviewed_by_id VARCHAR(20) NULL,
+  reviewed_by_name VARCHAR(120) NULL,
+  reviewed_by_role VARCHAR(20) NULL,
+  review_note TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ NULL
+);
+
 -- Indeks Pencarian & Pembatas 1 Akun (1 Master, 1 Admin, 1 Staf Ahli pada tabel admins)
 CREATE INDEX IF NOT EXISTS idx_parcels_status ON parcels (status_akuisisi);
 CREATE INDEX IF NOT EXISTS idx_parcels_desa ON parcels (desa_kelurahan);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
+CREATE INDEX IF NOT EXISTS idx_download_requests_status ON download_requests (status);
+CREATE INDEX IF NOT EXISTS idx_download_requests_requester ON download_requests (requester_id);
+CREATE INDEX IF NOT EXISTS idx_download_requests_parcel ON download_requests (parcel_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_single_master_role
   ON public.admins (role) WHERE role = 'master';
@@ -169,6 +205,7 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE parcels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE download_requests ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "prototype_all_admins" ON admins;
 CREATE POLICY "prototype_all_admins" ON admins FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
@@ -184,6 +221,9 @@ CREATE POLICY "prototype_all_project_settings" ON project_settings FOR ALL TO an
 
 DROP POLICY IF EXISTS "prototype_all_audit_logs" ON audit_logs;
 CREATE POLICY "prototype_all_audit_logs" ON audit_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "prototype_all_download_requests" ON download_requests;
+CREATE POLICY "prototype_all_download_requests" ON download_requests FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 -- Hak akses tabel untuk role anon & authenticated (wajib di Supabase PostgreSQL)
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
