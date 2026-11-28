@@ -36,7 +36,7 @@
       dir: 'asc'
     },
     layers: {
-      basemap: 'dark',
+      basemap: 'google_satellite',
       showParcels: true,
       showRow: true,
       showLabels: true
@@ -232,7 +232,7 @@
     })
   };
 
-  let activeBasemapLayer = basemaps.dark;
+  let activeBasemapLayer = basemaps.google_satellite;
   activeBasemapLayer.addTo(map);
 
   const rowLayerGroup = L.layerGroup().addTo(map);
